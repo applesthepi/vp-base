@@ -1,1 +1,2 @@
-pub mod instance;
+mod instance;
+pub use instance::*;
