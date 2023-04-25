@@ -6,7 +6,8 @@ use shaderc::{Compiler, CompileOptions, ShaderKind};
 use crate::Device;
 
 pub trait Pipeline {
-
+	fn get_viewport(&self) -> [vk::Viewport; 1];
+	fn get_scissor(&self) -> [vk::Rect2D; 1];
 }
 
 pub struct ShaderLoader<'a> {

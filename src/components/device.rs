@@ -16,6 +16,7 @@ pub struct Device {
 	pub physical_device: vk::PhysicalDevice,
 	pub queue_family_index: u32,
 	pub surface_loader: khr::Surface,
+	pub surface_format: vk::SurfaceFormatKHR,
 }
 
 impl Device {
@@ -74,11 +75,16 @@ impl Device {
 				&device_info,
 				None
 			).unwrap();
+		let surface_format = surface_loader.get_physical_device_surface_formats(
+			physical_device,
+			surface.surface,
+		).unwrap()[0];
 		Self {
 			device,
 			queue_family_index,
 			surface_loader,
 			physical_device,
+			surface_format,
 		}
 	}}
 
