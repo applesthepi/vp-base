@@ -16,6 +16,7 @@ pub struct Device {
 	pub physical_device: vk::PhysicalDevice,
 	pub queue_family_index: u32,
 	pub surface_loader: khr::Surface,
+	pub physical_device_memory_properties: vk::PhysicalDeviceMemoryProperties,
 	pub surface_format: vk::SurfaceFormatKHR,
 }
 
@@ -56,6 +57,9 @@ impl Device {
 						}
 					})
 			}).expect("Couldn't find suitable device.");
+		let physical_device_memory_properties = instance.instance.get_physical_device_memory_properties(
+			physical_device,
+		);
 		let queue_family_index = queue_family_index as u32;
 		let device_queue_info =
 			vk::DeviceQueueCreateInfo::builder()
@@ -84,6 +88,7 @@ impl Device {
 			queue_family_index,
 			surface_loader,
 			physical_device,
+			physical_device_memory_properties,
 			surface_format,
 		}
 	}}

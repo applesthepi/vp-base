@@ -42,9 +42,6 @@ pub fn create_depth_image(
 	device: &Device,
 	window: &Window,
 ) -> () { unsafe {
-	let device_memory_properties = instance.instance.get_physical_device_memory_properties(
-		device.physical_device
-	);
 	let image_info = vk::ImageCreateInfo::builder()
 		.image_type(vk::ImageType::TYPE_2D)
 		.format(vk::Format::D16_UNORM)
@@ -63,8 +60,9 @@ pub fn create_depth_image(
 	let memory_requirements = device.device.get_image_memory_requirements(
 		image,
 	);
-	let memory_index: u32 = device_memory_properties.memory_types[..device_memory_properties.memory_type_count as _]
-		.iter().enumerate().find(
+	let memory_index: u32 = device.physical_device_memory_properties.memory_types[
+			..device.physical_device_memory_properties.memory_type_count as _
+		].iter().enumerate().find(
 			|(index, memory_type)| {
 				(1 << index) & memory_requirements.memory_type_bits != 0 &&
 				memory_type.property_flags & vk::MemoryPropertyFlags::DEVICE_LOCAL == vk::MemoryPropertyFlags::DEVICE_LOCAL
