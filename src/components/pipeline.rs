@@ -8,6 +8,7 @@ use crate::Device;
 pub trait Pipeline {
 	fn get_viewport(&self) -> [vk::Viewport; 1];
 	fn get_scissor(&self) -> [vk::Rect2D; 1];
+	fn get_pipeline(&self) -> vk::Pipeline;
 }
 
 pub struct ShaderLoader<'a> {
@@ -35,14 +36,14 @@ pub fn load_shader(
 	shader_kind: ShaderKind,
 	name: &str,
 ) -> ShaderModule { unsafe {
-	let glsl_path = ("res/".to_string() + name) + match shader_kind {
+	let glsl_path = ("res/shaders/".to_string() + name) + match shader_kind {
 		ShaderKind::Vertex => ".vert",
 		ShaderKind::Fragment => ".frag",
 		ShaderKind::Compute => ".comp",
 		_ => { panic!("not impl"); }
 	};
 	let glsl_path = glsl_path.as_str();
-	let spv_path = ("res/".to_string() + name) + ".spv";
+	let spv_path = ("res/shaders/".to_string() + name) + ".spv";
 	let spv_path = spv_path.as_str();
 	let mut file = File::open(glsl_path).expect(
 		format!("shader \"{}\" does not exist", glsl_path).as_str()
@@ -52,21 +53,24 @@ pub fn load_shader(
 	let binary_artifact = shader_loader.compiler.compile_into_spirv(
 		text.as_str(),
 		shader_kind,
-		"test.glsl", "main",
+		glsl_path, "main",
 		Some(&shader_loader.options),
 	).expect(format!("failed to compile \"{}\"", glsl_path).as_str());
 	debug_assert_eq!(Some(&0x07230203), binary_artifact.as_binary().first());
-	let text_artifact = shader_loader.compiler.compile_into_spirv_assembly(
-		text.as_str(),
-		shader_kind,
-		"test2.glsl", "main",
-		Some(&shader_loader.options),
-	).expect(format!("failed to compile \"{}\"", glsl_path).as_str());
-	debug_assert!(text_artifact.as_text().starts_with("; SPIR-V\n"));
-	let mut spv_file = File::open(spv_path).unwrap();
-	let spv_text = read_spv(&mut spv_file).unwrap();
+	// let text_artifact = shader_loader.compiler.compile_into_spirv_assembly(
+	// 	text.as_str(),
+	// 	shader_kind,
+	// 	glsl_path, "main",
+	// 	Some(&shader_loader.options),
+	// ).expect(format!("failed to compile \"{}\"", glsl_path).as_str());
+	// debug_assert!(text_artifact.as_text().starts_with("; SPIR-V\n"));
+	// let mut spv_file = File::open(spv_path).unwrap();
+	// let spv_text = read_spv(&mut spv_file).unwrap();
+
+	let spv_text = binary_artifact.as_binary();
+
 	let shader_info = vk::ShaderModuleCreateInfo::builder()
-		.code(&spv_text)
+		.code(spv_text)
 		.build();
 	device.device.create_shader_module(
 		&shader_info,

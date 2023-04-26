@@ -5,7 +5,8 @@ use ash::{vk, util::Align};
 use crate::Device;
 
 pub trait IndexBuffer {
-	fn bind(&self, device: &Device);
+	fn bind(&self, device: &Device, command_buffer: vk::CommandBuffer);
+	fn index_count(&self) -> usize;
 }
 
 // Index buffer with gpu only memory cached on cpu for future reference.
@@ -17,6 +18,7 @@ pub struct IndexBufferCGO<'a> {
 
 /// Index buffer with gpu only memory (nothing cached).
 pub struct IndexBufferGO {
+	pub index_count: usize,
 	buffer_gpu: vk::Buffer,
 	buffer_memory_gpu: vk::DeviceMemory,
 }
@@ -30,6 +32,11 @@ impl<'a> IndexBufferCGO<'a> {
 			device,
 			indices,
 		);
+		device.device.bind_buffer_memory(
+			buffer,
+			buffer_memory,
+			0,
+		).unwrap();
 		Self {
 			indices_cpu: indices,
 			buffer_gpu: buffer,
@@ -42,13 +49,18 @@ impl<'a> IndexBuffer for IndexBufferCGO<'a> {
 	fn bind(
 		&self,
 		device: &Device,
+		command_buffer: vk::CommandBuffer,
 	) { unsafe {
-		device.device.bind_buffer_memory(
+		device.device.cmd_bind_index_buffer(
+			command_buffer,
 			self.buffer_gpu,
-			self.buffer_memory_gpu,
 			0,
-		).unwrap();
+			vk::IndexType::UINT32,
+		);
 	}}
+	fn index_count(&self) -> usize {
+		self.indices_cpu.len()
+	}
 }
 
 impl IndexBufferGO {
@@ -60,7 +72,13 @@ impl IndexBufferGO {
 			device,
 			indices,
 		);
+		device.device.bind_buffer_memory(
+			buffer,
+			buffer_memory,
+			0,
+		).unwrap();
 		Self {
+			index_count: indices.len(),
 			buffer_gpu: buffer,
 			buffer_memory_gpu: buffer_memory,
 		}
@@ -71,13 +89,18 @@ impl IndexBuffer for IndexBufferGO {
 	fn bind(
 		&self,
 		device: &Device,
+		command_buffer: vk::CommandBuffer,
 	) { unsafe {
-		device.device.bind_buffer_memory(
+		device.device.cmd_bind_index_buffer(
+			command_buffer,
 			self.buffer_gpu,
-			self.buffer_memory_gpu,
 			0,
-		).unwrap();
+			vk::IndexType::UINT32,
+		);
 	}}
+	fn index_count(&self) -> usize {
+		self.index_count
+	}
 }
 
 fn generate_buffer(

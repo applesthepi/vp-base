@@ -26,7 +26,7 @@ impl CommandBuffer {
 		let fence_info = vk::FenceCreateInfo::builder()
 			.flags(vk::FenceCreateFlags::SIGNALED)
 			.build();
-		let fence_submit = device.create_fence(
+		let fence_submit = device.device.create_fence(
 			&fence_info,
 			None,
 		).unwrap();

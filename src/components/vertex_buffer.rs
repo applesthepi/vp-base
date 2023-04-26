@@ -5,7 +5,7 @@ use ash::{vk, util::Align};
 use crate::{Vertex, Device};
 
 pub trait VertexBuffer {
-	fn bind(&self, device: &Device);
+	fn bind(&self, device: &Device, command_buffer: vk::CommandBuffer);
 }
 
 // Vertex buffer with gpu only memory cached on cpu for future reference.
@@ -30,6 +30,11 @@ impl<'a, V: Vertex + Copy> VertexBufferCGO<'a, V> {
 			device,
 			vertices,
 		);
+		device.device.bind_buffer_memory(
+			buffer,
+			buffer_memory,
+			0,
+		).unwrap();
 		Self {
 			vertices_cpu: vertices,
 			buffer_gpu: buffer,
@@ -42,12 +47,14 @@ impl<'a, V: Vertex + Copy> VertexBuffer for VertexBufferCGO<'a, V> {
 	fn bind(
 		&self,
 		device: &Device,
+		command_buffer: vk::CommandBuffer,
 	) { unsafe {
-		device.device.bind_buffer_memory(
-			self.buffer_gpu,
-			self.buffer_memory_gpu,
+		device.device.cmd_bind_vertex_buffers(
+			command_buffer,
 			0,
-		).unwrap();
+			&[self.buffer_gpu],
+			&[0],
+		);
 	}}
 }
 
@@ -60,6 +67,11 @@ impl VertexBufferGO {
 			device,
 			vertices,
 		);
+		device.device.bind_buffer_memory(
+			buffer,
+			buffer_memory,
+			0,
+		).unwrap();
 		Self {
 			buffer_gpu: buffer,
 			buffer_memory_gpu: buffer_memory,
@@ -71,12 +83,14 @@ impl VertexBuffer for VertexBufferGO {
 	fn bind(
 		&self,
 		device: &Device,
+		command_buffer: vk::CommandBuffer,
 	) { unsafe {
-		device.device.bind_buffer_memory(
-			self.buffer_gpu,
-			self.buffer_memory_gpu,
+		device.device.cmd_bind_vertex_buffers(
+			command_buffer,
 			0,
-		).unwrap();
+			&[self.buffer_gpu],
+			&[0],
+		);
 	}}
 }
 
