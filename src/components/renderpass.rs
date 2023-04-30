@@ -1,6 +1,6 @@
 use ash::vk;
 
-use crate::{Swapchain, Device};
+use crate::{Swapchain, Device, CommandBuffer};
 
 pub struct RenderPass {
 	pub renderpass: vk::RenderPass,
@@ -62,5 +62,49 @@ impl RenderPass {
 		Self {
 			renderpass,
 		}
+	}}
+
+	pub fn open(
+		&self,
+		device: &Device,
+		extent: &vk::Extent2D,
+		framebuffer: &vk::Framebuffer,
+		command_buffer: &vk::CommandBuffer,
+	) { unsafe {
+		let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+			.render_pass(self.renderpass)
+			.framebuffer(*framebuffer)
+			.render_area((*extent).into())
+			.clear_values(
+				&[
+					vk::ClearValue {
+						color: vk::ClearColorValue {
+							float32: [0.0, 0.0, 0.0, 0.0],
+						}
+					},
+					vk::ClearValue {
+						depth_stencil: vk::ClearDepthStencilValue {
+							depth: 1.0,
+							stencil: 0,
+						}
+					},
+				]
+			)
+			.build();
+		device.device.cmd_begin_render_pass(
+			*command_buffer,
+			&render_pass_begin_info,
+			vk::SubpassContents::INLINE,
+		);
+	}}
+
+	pub fn close(
+		&self,
+		device: &Device,
+		command_buffer: &CommandBuffer,
+	) { unsafe {
+		device.device.cmd_end_render_pass(
+			command_buffer.command_buffer,
+		);
 	}}
 }

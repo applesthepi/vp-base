@@ -38,10 +38,9 @@ pub fn create_presentation_images(
 }}
 
 pub fn create_depth_image(
-	instance: &Instance,
 	device: &Device,
 	window: &Window,
-) -> () { unsafe {
+) -> (vk::Image, vk::ImageView) { unsafe {
 	let image_info = vk::ImageCreateInfo::builder()
 		.image_type(vk::ImageType::TYPE_2D)
 		.format(vk::Format::D16_UNORM)
@@ -85,4 +84,21 @@ pub fn create_depth_image(
 		memory_alloc,
 		0,
 	).unwrap();
+	let image_view_info = vk::ImageViewCreateInfo::builder()
+		.subresource_range(
+			vk::ImageSubresourceRange::builder()
+				.aspect_mask(vk::ImageAspectFlags::DEPTH)
+				.level_count(1)
+				.layer_count(1)
+				.build()
+		)
+		.image(image)
+		.format(image_info.format)
+		.view_type(vk::ImageViewType::TYPE_2D)
+		.build();
+	let image_view = device.device.create_image_view(
+		&image_view_info,
+		None,
+	).unwrap();
+	(image, image_view)
 }}

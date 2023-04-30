@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use ash::vk;
 
 use crate::{Device, CommandBuffer};

@@ -16,7 +16,7 @@ pub struct ShaderLoader<'a> {
 	options: CompileOptions<'a>,
 }
 
-impl ShaderLoader<'_> {
+impl<'a> ShaderLoader<'a> {
 	pub fn new(
 
 	) -> Arc<Self> {

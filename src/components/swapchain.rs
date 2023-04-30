@@ -12,7 +12,7 @@ pub struct Swapchain {
 impl Swapchain {
 	pub fn new(
 		instance: &Instance,
-		window: &Window,
+		window: &mut Window,
 		surface: &Surface,
 		device: &Device,
 	) -> Self { unsafe {
@@ -32,6 +32,11 @@ impl Swapchain {
 				device.physical_device,
 				surface.surface,
 			).unwrap();
+		window.extent = match surface_capabilities.current_extent.width {
+			u32::MAX => window.extent,
+			_ => surface_capabilities.current_extent,
+		};
+
 		let mut desired_image_count = surface_capabilities.min_image_count + 1;
 		if surface_capabilities.max_image_count > 0 &&
 			desired_image_count > surface_capabilities.max_image_array_layers {

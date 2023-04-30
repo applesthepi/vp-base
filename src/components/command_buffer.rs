@@ -36,4 +36,29 @@ impl CommandBuffer {
 			fence_submit,
 		}
 	}}
+	pub fn open(
+		&self,
+		device: &Device,
+	) { unsafe {
+		device.device.reset_command_buffer(
+			self.command_buffer,
+			vk::CommandBufferResetFlags::RELEASE_RESOURCES,
+		).unwrap();
+		let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder()
+			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+			.build();
+		device.device.begin_command_buffer(
+			self.command_buffer,
+			&command_buffer_begin_info,
+		).unwrap();
+	}}
+
+	pub fn close(
+		&self,
+		device: &Device,
+	) { unsafe {
+		device.device.end_command_buffer(
+			self.command_buffer,
+		).unwrap();
+	}}
 }
