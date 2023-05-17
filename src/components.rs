@@ -26,3 +26,5 @@ mod vertex_buffer;
 pub use vertex_buffer::*;
 mod index_buffer;
 pub use index_buffer::*;
+mod blocks;
+pub use blocks::*;

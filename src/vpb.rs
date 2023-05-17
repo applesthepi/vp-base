@@ -5,6 +5,34 @@ pub use components::*;
 mod presentation;
 pub use presentation::*;
 
-pub struct Base {
-	pub a: i8,
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! gmuc {
+	($arc:expr) => { unsafe {
+		Arc::get_mut_unchecked(&mut $arc).unwrap()
+	}};
+}
+
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! gmuc_ref {
+	($arc:expr) => { unsafe {
+		Arc::get_mut_unchecked($arc).unwrap()
+	}};
+}
+
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! gmuc {
+	($arc:expr) => { unsafe {
+		Arc::get_mut(&mut $arc).unwrap()
+	}};
+}
+
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! gmuc_ref {
+	($arc:expr) => {
+		Arc::get_mut($arc).unwrap()
+	};
 }
