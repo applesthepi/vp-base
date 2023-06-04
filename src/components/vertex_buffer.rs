@@ -11,14 +11,14 @@ pub trait VertexBuffer {
 // Vertex buffer with gpu only memory cached on cpu for future reference.
 pub struct VertexBufferCGO<'a, V: Vertex> {
 	pub vertices_cpu: &'a [V],
-	buffer_gpu: vk::Buffer,
-	buffer_memory_gpu: vk::DeviceMemory,
+	pub buffer_gpu: vk::Buffer,
+	pub buffer_memory_gpu: vk::DeviceMemory,
 }
 
 /// Vertex buffer with gpu only memory (nothing cached).
 pub struct VertexBufferGO {
-	buffer_gpu: vk::Buffer,
-	buffer_memory_gpu: vk::DeviceMemory,
+	pub buffer_gpu: vk::Buffer,
+	pub buffer_memory_gpu: vk::DeviceMemory,
 }
 
 impl<'a, V: Vertex + Copy> VertexBufferCGO<'a, V> {

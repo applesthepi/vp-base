@@ -17,7 +17,7 @@ impl Swapchain {
 		device: &Device,
 	) -> Self { unsafe {
 		let present_queue = device.device.get_device_queue(
-			device.queue_family_index,
+			device.queue_family_index[0],
 			0
 		);
 		let surface_format =
@@ -39,7 +39,7 @@ impl Swapchain {
 
 		let mut desired_image_count = surface_capabilities.min_image_count + 1;
 		if surface_capabilities.max_image_count > 0 &&
-			desired_image_count > surface_capabilities.max_image_array_layers {
+			desired_image_count > surface_capabilities.max_image_count {
 			desired_image_count = surface_capabilities.max_image_count;
 		}
 		let pre_transform = if surface_capabilities

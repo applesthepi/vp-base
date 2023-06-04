@@ -12,15 +12,15 @@ pub trait IndexBuffer {
 // Index buffer with gpu only memory cached on cpu for future reference.
 pub struct IndexBufferCGO<'a> {
 	pub indices_cpu: &'a [u32],
-	buffer_gpu: vk::Buffer,
-	buffer_memory_gpu: vk::DeviceMemory,
+	pub buffer_gpu: vk::Buffer,
+	pub buffer_memory_gpu: vk::DeviceMemory,
 }
 
 /// Index buffer with gpu only memory (nothing cached).
 pub struct IndexBufferGO {
 	pub index_count: usize,
-	buffer_gpu: vk::Buffer,
-	buffer_memory_gpu: vk::DeviceMemory,
+	pub buffer_gpu: vk::Buffer,
+	pub buffer_memory_gpu: vk::DeviceMemory,
 }
 
 impl<'a> IndexBufferCGO<'a> {

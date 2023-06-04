@@ -10,8 +10,8 @@ pub struct CommandBuffer {
 
 impl CommandBuffer {
 	pub fn new(
-		device: &mut Device,
-		command_pool: &mut CommandPool,
+		device: &Device,
+		command_pool: &CommandPool,
 		swapchain: &Swapchain,
 	) -> Self { unsafe {
 		let command_buffer_info = vk::CommandBufferAllocateInfo::builder()

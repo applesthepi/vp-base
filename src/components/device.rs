@@ -14,7 +14,7 @@ const PRIORITIES: [f32; 1] = [
 pub struct Device {
 	pub device: ash::Device,
 	pub physical_device: vk::PhysicalDevice,
-	pub queue_family_index: u32,
+	pub queue_family_index: [u32; 1],
 	pub surface_loader: khr::Surface,
 	pub physical_device_memory_properties: vk::PhysicalDeviceMemoryProperties,
 	pub surface_format: vk::SurfaceFormatKHR,
@@ -85,7 +85,7 @@ impl Device {
 		).unwrap()[0];
 		Self {
 			device,
-			queue_family_index,
+			queue_family_index: [queue_family_index],
 			surface_loader,
 			physical_device,
 			physical_device_memory_properties,

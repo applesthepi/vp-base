@@ -15,7 +15,7 @@ impl CommandPool {
 	) -> Self { unsafe {
 		let command_pool_info = vk::CommandPoolCreateInfo::builder()
 			.flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-			.queue_family_index(device.queue_family_index)
+			.queue_family_index(device.queue_family_index[0])
 			.build();
 		let command_pool = device.device.create_command_pool(
 			&command_pool_info,

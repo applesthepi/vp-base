@@ -3,7 +3,7 @@ use ash::vk;
 use crate::{Swapchain, Device, CommandBuffer};
 
 pub struct RenderPass {
-	pub renderpass: vk::RenderPass,
+	pub render_pass: vk::RenderPass,
 }
 
 impl RenderPass {
@@ -60,7 +60,7 @@ impl RenderPass {
 			None,
 		).unwrap();
 		Self {
-			renderpass,
+			render_pass: renderpass,
 		}
 	}}
 
@@ -72,7 +72,7 @@ impl RenderPass {
 		command_buffer: &vk::CommandBuffer,
 	) { unsafe {
 		let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-			.render_pass(self.renderpass)
+			.render_pass(self.render_pass)
 			.framebuffer(*framebuffer)
 			.render_area((*extent).into())
 			.clear_values(

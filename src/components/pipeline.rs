@@ -9,21 +9,32 @@ pub trait Pipeline {
 	fn get_viewport(&self) -> [vk::Viewport; 1];
 	fn get_scissor(&self) -> [vk::Rect2D; 1];
 	fn get_pipeline(&self) -> vk::Pipeline;
-	// fn get_blocks(&self) -> Vec<BlockState>;
-	fn bind_blocks(
-		&self,
+	fn get_pipeline_layout(&self) -> vk::PipelineLayout;
+	fn get_descriptor_pool(&self) -> vk::DescriptorPool;
+	fn get_block(&self) -> Arc<BlockState>;
+	fn update_blocks(
+		&mut self,
 		device: &Device,
 		command_buffer: &vk::CommandBuffer,
 		frame: usize,
 	);
-	fn destroy_set_layouts(
-		&self,
+	fn bind_block(
+		&mut self,
+		device: &Device,
+		command_buffer: &vk::CommandBuffer,
+		frame: usize,
+	);
+	fn destroy_set_layout(
+		&mut self,
 		device: &Device,
 	);
+	fn object_binding_set(
+		&self,
+	) -> Vec<(u32, u32)>;
 }
 
 pub struct ShaderLoader {
-	compiler: Compiler,
+	pub compiler: Compiler,
 }
 
 impl ShaderLoader {

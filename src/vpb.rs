@@ -5,34 +5,36 @@ pub use components::*;
 mod presentation;
 pub use presentation::*;
 
-#[cfg(not(debug_assertions))]
+// TODO: replace all builders with structs
+
+// #[cfg(not(debug_assertions))]
 #[macro_export]
 macro_rules! gmuc {
 	($arc:expr) => { unsafe {
-		Arc::get_mut_unchecked(&mut $arc).unwrap()
+		Arc::get_mut_unchecked(&mut $arc)
 	}};
 }
 
-#[cfg(not(debug_assertions))]
+// #[cfg(not(debug_assertions))]
 #[macro_export]
 macro_rules! gmuc_ref {
 	($arc:expr) => { unsafe {
-		Arc::get_mut_unchecked($arc).unwrap()
+		Arc::get_mut_unchecked($arc)
 	}};
 }
 
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! gmuc {
-	($arc:expr) => { unsafe {
-		Arc::get_mut(&mut $arc).unwrap()
-	}};
-}
+// #[cfg(debug_assertions)]
+// #[macro_export]
+// macro_rules! gmuc {
+// 	($arc:expr) => { unsafe {
+// 		Arc::get_mut(&mut $arc).unwrap()
+// 	}};
+// }
 
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! gmuc_ref {
-	($arc:expr) => {
-		Arc::get_mut($arc).unwrap()
-	};
-}
+// #[cfg(debug_assertions)]
+// #[macro_export]
+// macro_rules! gmuc_ref {
+// 	($arc:expr) => {
+// 		Arc::get_mut($arc).unwrap()
+// 	};
+// }

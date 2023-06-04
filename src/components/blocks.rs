@@ -1,10 +1,12 @@
-use std::{ffi::c_void, mem::align_of};
+use std::{ffi::c_void, mem::align_of, fmt::Display};
 
 use ash::{vk, util::Align};
+use bytemuck::{Pod, Zeroable, bytes_of};
+use serde::Serialize;
 
 use crate::{Device, Instance};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DescriptorSet {
 	pub buffer: vk::Buffer,
 	pub memory: vk::DeviceMemory,
@@ -17,6 +19,9 @@ pub struct DescriptorSet {
 pub struct BlockState {
 	pub layout: vk::DescriptorSetLayout,
 	pub descriptor_buffers: Vec<DescriptorSet>,
+	pub binding: u32,
+	pub set: u32,
+	pub descriptor_size: usize,
 }
 
 impl BlockState {
@@ -24,26 +29,45 @@ impl BlockState {
 		device: &Device,
 		instance: &Instance,
 		descriptor_pool: &vk::DescriptorPool,
+		descriptor_set_layout: &vk::DescriptorSetLayout,
 		frame_count: usize,
 		binding: u32,
+		set: u32,
 		descriptor_size: usize,
+		descriptor_count: u32,
 	) -> Self { unsafe {
-		let descriptor_set_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-			.binding(binding)
-			.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-			.stage_flags(vk::ShaderStageFlags::VERTEX)
-			.descriptor_count(1)
-			.build();
-		let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-			.bindings(&[
-				descriptor_set_layout_binding,
-			]).build();
-		let descriptor_set_layout = device.device.create_descriptor_set_layout(
-			&descriptor_set_layout_info,
-			None,
-		).unwrap();
+		// let descriptor_set_layout_binding = vk::DescriptorSetLayoutBinding::builder()
+		// 	.binding(binding)
+		// 	.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+		// 	.stage_flags(vk::ShaderStageFlags::VERTEX)
+		// 	.descriptor_count(descriptor_count)
+		// 	.build();
+		// let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+		// 	.bindings(&[
+		// 		descriptor_set_layout_binding,
+		// 	]).build();
+		// let descriptor_set_layout = device.device.create_descriptor_set_layout(
+		// 	&descriptor_set_layout_info,
+		// 	None,
+		// ).unwrap();
 		let mut layouts = Vec::with_capacity(frame_count);
-		layouts.resize(frame_count, descriptor_set_layout);
+		layouts.resize(frame_count, *descriptor_set_layout);
+		// for layout in layouts.iter_mut() {
+		// 	let descriptor_set_layout_binding = vk::DescriptorSetLayoutBinding::builder()
+		// 		.binding(binding)
+		// 		.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+		// 		.stage_flags(vk::ShaderStageFlags::VERTEX)
+		// 		.descriptor_count(descriptor_count)
+		// 		.build();
+		// 	let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+		// 		.bindings(&[
+		// 			descriptor_set_layout_binding,
+		// 		]).build();
+		// 	*layout = device.device.create_descriptor_set_layout(
+		// 		&descriptor_set_layout_info,
+		// 		None,
+		// 	).unwrap();
+		// }
 		let mut descriptor_buffers: Vec<DescriptorSet> = Vec::with_capacity(frame_count);
 		descriptor_buffers.resize(frame_count, DescriptorSet {
 			buffer: vk::Buffer::null(),
@@ -55,9 +79,16 @@ impl BlockState {
 		for descriptor_buffer in descriptor_buffers.iter_mut() {
 			let buffer_info = vk::BufferCreateInfo::builder()
 				.size(descriptor_size as u64)
-				.usage(vk::BufferUsageFlags::UNIFORM_BUFFER)
-				.sharing_mode(vk::SharingMode::CONCURRENT)
+				.usage(
+					vk::BufferUsageFlags::UNIFORM_BUFFER/* |
+					vk::BufferUsageFlags::TRANSFER_DST*/
+				)
+				.sharing_mode(vk::SharingMode::EXCLUSIVE)
+				// .queue_family_indices(&device.queue_family_index)
 				.build();
+			// buffer_info.queue_family_index_count = 1;
+			// buffer_info.p_queue_family_indices = device.queue_family_index.as_ptr();
+			// println!("{}", buffer_info.queue_family_index_count);
 			let buffer = device.device.create_buffer(
 				&buffer_info,
 				None,
@@ -104,15 +135,16 @@ impl BlockState {
 			&descriptor_set_alloc_info,
 		).unwrap();
 		for (i, descriptor_set) in descriptor_buffers.iter_mut().enumerate() {
+			println!("{:?}", descriptor_set.buffer);
 			let descriptor_buffer_info = vk::DescriptorBufferInfo::builder()
 				.buffer(descriptor_set.buffer)
-				.offset(0)
-				.range(descriptor_size as u64)
+				// .offset(0)
+				.range(vk::WHOLE_SIZE)
 				.build();
 			let write_descriptor_set = vk::WriteDescriptorSet::builder()
 				.dst_set(descriptor_set_alloc[i])
 				.dst_binding(binding)
-				.dst_array_element(0)
+				// .dst_array_element(0)
 				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
 				.buffer_info(&[descriptor_buffer_info])
 				.build();
@@ -123,11 +155,52 @@ impl BlockState {
 			descriptor_set.write = write_descriptor_set;
 			descriptor_set.set = descriptor_set_alloc[i];
 		}
-
-
+		println!("{:?}", descriptor_buffers);
 		Self {
-			layout: descriptor_set_layout,
+			layout: *descriptor_set_layout,
 			descriptor_buffers,
+			binding,
+			set,
+			descriptor_size,
+		}
+	}}
+
+	pub fn update<T: Pod + Zeroable + Copy + Clone>(
+		&self,
+		device: &Device,
+		command_buffer: &vk::CommandBuffer,
+		data: &T,
+		frame: Option<usize>,
+	) { unsafe {
+		let data = bytes_of(data);
+		if let Some(frame) = frame {
+			std::ptr::copy(data.as_ptr(), self.descriptor_buffers[frame].mapped.cast(), data.len());
+			// device.device.cmd_update_buffer(*command_buffer, self.descriptor_buffers[frame].buffer, 0, data);
+			device.device.update_descriptor_sets(
+				&[self.descriptor_buffers[frame].write],
+				&[],
+			);
+		} else {
+			panic!("non frame specific descriptor set updating is not finished; must specify a frame.");
+			// for descriptor_set in self.descriptor_buffers.iter() {
+			// 	device.device.cmd_update_buffer(*command_buffer, descriptor_set.buffer, 0, data);
+			// 	let descriptor_buffer_info = vk::DescriptorBufferInfo::builder()
+			// 		.buffer(descriptor_set.buffer)
+			// 		.offset(0)
+			// 		.range(self.descriptor_size as u64)
+			// 		.build();
+			// 	let write_descriptor_set = vk::WriteDescriptorSet::builder()
+			// 		.dst_set(descriptor_set.set)
+			// 		.dst_binding(self.binding)
+			// 		.dst_array_element(0)
+			// 		.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+			// 		.buffer_info(&[descriptor_buffer_info])
+			// 		.build();
+			// 	device.device.update_descriptor_sets(
+			// 		&[write_descriptor_set],
+			// 		&[],
+			// 	);
+			// }
 		}
 	}}
 }

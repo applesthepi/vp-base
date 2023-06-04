@@ -1,6 +1,6 @@
 use std::{ffi::{CStr, c_char}, borrow::Cow, marker::PhantomData};
 
-use ash::{vk, extensions::ext::DebugUtils};
+use ash::{vk::{self, DebugUtilsMessageSeverityFlagsEXT}, extensions::ext::DebugUtils};
 use raw_window_handle::HasRawDisplayHandle;
 
 use crate::Window;
@@ -96,6 +96,13 @@ unsafe extern "system" fn debug_callback(
 	} else {
 		 CStr::from_ptr(callback_data.p_message).to_string_lossy()
 	};
+
+	match message_severity {
+		DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+			println!("E");
+		},
+		_ => {}
+	}
 
 	println!(
 		 "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
