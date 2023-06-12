@@ -28,3 +28,5 @@ mod index_buffer;
 pub use index_buffer::*;
 mod blocks;
 pub use blocks::*;
+mod descriptor_pool;
+pub use descriptor_pool::*;

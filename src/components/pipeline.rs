@@ -8,14 +8,21 @@ use crate::{Device, BlockState};
 pub trait Pipeline {
 	fn get_viewport(&self) -> [vk::Viewport; 1];
 	fn get_scissor(&self) -> [vk::Rect2D; 1];
+	fn destroy_block_state_memory(
+		&mut self,
+		device: &Arc<Device>,
+	);
+	fn destroy_pipeline(
+		&mut self,
+		device: &Arc<Device>,
+	);
 	fn get_pipeline(&self) -> vk::Pipeline;
 	fn get_pipeline_layout(&self) -> vk::PipelineLayout;
-	fn get_descriptor_pool(&self) -> vk::DescriptorPool;
 	fn get_block(&self) -> Arc<BlockState>;
 	fn update_blocks(
 		&mut self,
 		device: &Device,
-		command_buffer: &vk::CommandBuffer,
+		extent: &vk::Extent2D,
 		frame: usize,
 	);
 	fn bind_block(

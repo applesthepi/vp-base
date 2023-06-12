@@ -1,4 +1,5 @@
 use std::{ffi::c_void, mem::align_of, fmt::Display};
+use std::ptr::copy_nonoverlapping as memcpy;
 
 use ash::{vk, util::Align};
 use bytemuck::{Pod, Zeroable, bytes_of};
@@ -7,18 +8,18 @@ use serde::Serialize;
 use crate::{Device, Instance};
 
 #[derive(Clone, Debug)]
-pub struct DescriptorSet {
+pub struct FrameSet {
 	pub buffer: vk::Buffer,
 	pub memory: vk::DeviceMemory,
-	pub write: vk::WriteDescriptorSet,
-	pub mapped: *mut c_void,
 	pub set: vk::DescriptorSet,
+	pub write: vk::WriteDescriptorSet,
+	// pub mapped: *mut c_void,
 }
 
 #[derive(Clone)]
 pub struct BlockState {
 	pub layout: vk::DescriptorSetLayout,
-	pub descriptor_buffers: Vec<DescriptorSet>,
+	pub frame_sets: Vec<FrameSet>,
 	pub binding: u32,
 	pub set: u32,
 	pub descriptor_size: usize,
@@ -36,59 +37,114 @@ impl BlockState {
 		descriptor_size: usize,
 		descriptor_count: u32,
 	) -> Self { unsafe {
-		// let descriptor_set_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-		// 	.binding(binding)
-		// 	.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-		// 	.stage_flags(vk::ShaderStageFlags::VERTEX)
-		// 	.descriptor_count(descriptor_count)
-		// 	.build();
-		// let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-		// 	.bindings(&[
-		// 		descriptor_set_layout_binding,
-		// 	]).build();
-		// let descriptor_set_layout = device.device.create_descriptor_set_layout(
-		// 	&descriptor_set_layout_info,
-		// 	None,
-		// ).unwrap();
-		let mut layouts = Vec::with_capacity(frame_count);
-		layouts.resize(frame_count, *descriptor_set_layout);
-		// for layout in layouts.iter_mut() {
-		// 	let descriptor_set_layout_binding = vk::DescriptorSetLayoutBinding::builder()
-		// 		.binding(binding)
-		// 		.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-		// 		.stage_flags(vk::ShaderStageFlags::VERTEX)
-		// 		.descriptor_count(descriptor_count)
-		// 		.build();
-		// 	let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-		// 		.bindings(&[
-		// 			descriptor_set_layout_binding,
-		// 		]).build();
-		// 	*layout = device.device.create_descriptor_set_layout(
-		// 		&descriptor_set_layout_info,
-		// 		None,
-		// 	).unwrap();
-		// }
-		let mut descriptor_buffers: Vec<DescriptorSet> = Vec::with_capacity(frame_count);
-		descriptor_buffers.resize(frame_count, DescriptorSet {
-			buffer: vk::Buffer::null(),
-			memory: vk::DeviceMemory::null(),
-			mapped: std::ptr::null_mut(),
-			write: vk::WriteDescriptorSet::default(),
-			set: vk::DescriptorSet::null(),
-		});
-		for descriptor_buffer in descriptor_buffers.iter_mut() {
+		let mut frame_sets = BlockState::create_frame_sets(
+			device,
+			instance,
+			frame_count,
+			descriptor_size,
+		);
+		let (descriptor_sets, descriptor_writes) = BlockState::create_descriptor_sets(
+			device,
+			descriptor_pool,
+			descriptor_set_layout,
+			frame_count,
+			&frame_sets,
+			descriptor_size,
+		);
+		for (i, frame_set) in frame_sets.iter_mut().enumerate() {
+			frame_set.set = descriptor_sets[i];
+			frame_set.write = descriptor_writes[i];
+		}
+		Self {
+			layout: *descriptor_set_layout,
+			frame_sets,
+			binding,
+			set,
+			descriptor_size,
+		}
+	}}
+
+	pub fn update<T: Copy + Clone>(
+		&self,
+		device: &Device,
+		data: &T,
+		frame: Option<usize>,
+	) { unsafe {
+		// let data = bytes_of(data);
+		if let Some(frame) = frame {
+			let memory = device.device.map_memory(
+				self.frame_sets[frame].memory,
+				0,
+				self.descriptor_size as u64,
+				vk::MemoryMapFlags::empty(),
+			).unwrap();
+			memcpy(data, memory.cast(), 1);
+			device.device.unmap_memory(
+				self.frame_sets[frame].memory,
+			);
+		} else {
+			panic!("non frame specific descriptor set updating is not finished; must specify a frame.");
+		}
+	}}
+
+	pub fn destroy_memory(
+		&mut self,
+		device: &Device,
+	) { unsafe {
+		for frame_set in self.frame_sets.iter_mut() {
+			device.device.free_memory(
+				frame_set.memory,
+				None,
+			);
+			device.device.destroy_buffer(
+				frame_set.buffer,
+				None,
+			);
+		}
+	}}
+
+	pub fn recreate_memory(
+		&mut self,
+		device: &Device,
+		instance: &Instance,
+		descriptor_pool: &vk::DescriptorPool,
+		frame_count: usize,
+	) { unsafe {
+		self.frame_sets = BlockState::create_frame_sets(
+			device,
+			instance,
+			frame_count,
+			self.descriptor_size,
+		);
+		let (descriptor_sets, descriptor_writes) = BlockState::create_descriptor_sets(
+			device,
+			descriptor_pool,
+			&self.layout,
+			frame_count,
+			&self.frame_sets,
+			self.descriptor_size,
+		);
+		for (i, frame_set) in self.frame_sets.iter_mut().enumerate() {
+			frame_set.set = descriptor_sets[i];
+			frame_set.write = descriptor_writes[i];
+		}
+	}}
+	
+	fn create_frame_sets(
+		device: &Device,
+		instance: &Instance,
+		frame_count: usize,
+		descriptor_size: usize,
+	) -> Vec<FrameSet> { unsafe {
+		let mut frame_sets: Vec<FrameSet> = Vec::with_capacity(frame_count);
+		for _ in 0..frame_count {
 			let buffer_info = vk::BufferCreateInfo::builder()
 				.size(descriptor_size as u64)
 				.usage(
-					vk::BufferUsageFlags::UNIFORM_BUFFER/* |
-					vk::BufferUsageFlags::TRANSFER_DST*/
+					vk::BufferUsageFlags::UNIFORM_BUFFER
 				)
 				.sharing_mode(vk::SharingMode::EXCLUSIVE)
-				// .queue_family_indices(&device.queue_family_index)
 				.build();
-			// buffer_info.queue_family_index_count = 1;
-			// buffer_info.p_queue_family_indices = device.queue_family_index.as_ptr();
-			// println!("{}", buffer_info.queue_family_index_count);
 			let buffer = device.device.create_buffer(
 				&buffer_info,
 				None,
@@ -108,99 +164,65 @@ impl BlockState {
 				.allocation_size(buffer_memory_requirement.size)
 				.memory_type_index(buffer_memory_index)
 				.build();
-			let buffer_memory = device.device.allocate_memory(
+			let memory = device.device.allocate_memory(
 				&allocate_info,
 				None,
 			).unwrap();
-			let buffer_ptr = device.device.map_memory(
-				buffer_memory,
-				0,
-				buffer_memory_requirement.size,
-				vk::MemoryMapFlags::empty(),
-			).unwrap();
 			device.device.bind_buffer_memory(
 				buffer,
-				buffer_memory,
+				memory,
 				0,
 			).unwrap();
-			descriptor_buffer.buffer = buffer;
-			descriptor_buffer.memory = buffer_memory;
-			descriptor_buffer.mapped = buffer_ptr;
+			frame_sets.push(FrameSet {
+				buffer,
+				memory,
+				set: vk::DescriptorSet::null(),
+				write: vk::WriteDescriptorSet::default(),
+			});
 		}
-		let descriptor_set_alloc_info = vk::DescriptorSetAllocateInfo::builder()
+		frame_sets
+	}}
+
+	fn create_descriptor_sets(
+		device: &Device,
+		descriptor_pool: &vk::DescriptorPool,
+		descriptor_set_layout: &vk::DescriptorSetLayout,
+		frame_count: usize,
+		frame_sets: &Vec<FrameSet>,
+		descriptor_size: usize,
+	) -> (Vec<vk::DescriptorSet>, Vec<vk::WriteDescriptorSet>) { unsafe {
+		let layouts = vec![
+			*descriptor_set_layout;
+			frame_count
+		];
+		let info = vk::DescriptorSetAllocateInfo::builder()
 			.descriptor_pool(*descriptor_pool)
 			.set_layouts(&layouts)
 			.build();
-		let descriptor_set_alloc = device.device.allocate_descriptor_sets(
-			&descriptor_set_alloc_info,
+		let mut descriptor_sets = device.device.allocate_descriptor_sets(
+			&info,
 		).unwrap();
-		for (i, descriptor_set) in descriptor_buffers.iter_mut().enumerate() {
-			println!("{:?}", descriptor_set.buffer);
-			let descriptor_buffer_info = vk::DescriptorBufferInfo::builder()
-				.buffer(descriptor_set.buffer)
-				// .offset(0)
-				.range(vk::WHOLE_SIZE)
+		let mut descriptor_writes = Vec::with_capacity(descriptor_sets.len());
+		for (i, descriptor_set) in descriptor_sets.iter().enumerate() {
+			let info = vk::DescriptorBufferInfo::builder()
+				.buffer(frame_sets[i].buffer)
+				.offset(0)
+				.range(descriptor_size as u64)
 				.build();
-			let write_descriptor_set = vk::WriteDescriptorSet::builder()
-				.dst_set(descriptor_set_alloc[i])
-				.dst_binding(binding)
-				// .dst_array_element(0)
+			let buffer_info = &[info];
+			let write = vk::WriteDescriptorSet::builder()
+				.dst_set(*descriptor_set)
+				.dst_binding(0)
+				.dst_array_element(0)
 				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-				.buffer_info(&[descriptor_buffer_info])
+				.buffer_info(buffer_info)
 				.build();
 			device.device.update_descriptor_sets(
-				&[write_descriptor_set],
-				&[],
+				&[write],
+				&[] as &[vk::CopyDescriptorSet],
 			);
-			descriptor_set.write = write_descriptor_set;
-			descriptor_set.set = descriptor_set_alloc[i];
+			descriptor_writes.push(write);
 		}
-		println!("{:?}", descriptor_buffers);
-		Self {
-			layout: *descriptor_set_layout,
-			descriptor_buffers,
-			binding,
-			set,
-			descriptor_size,
-		}
-	}}
-
-	pub fn update<T: Pod + Zeroable + Copy + Clone>(
-		&self,
-		device: &Device,
-		command_buffer: &vk::CommandBuffer,
-		data: &T,
-		frame: Option<usize>,
-	) { unsafe {
-		let data = bytes_of(data);
-		if let Some(frame) = frame {
-			std::ptr::copy(data.as_ptr(), self.descriptor_buffers[frame].mapped.cast(), data.len());
-			// device.device.cmd_update_buffer(*command_buffer, self.descriptor_buffers[frame].buffer, 0, data);
-			device.device.update_descriptor_sets(
-				&[self.descriptor_buffers[frame].write],
-				&[],
-			);
-		} else {
-			panic!("non frame specific descriptor set updating is not finished; must specify a frame.");
-			// for descriptor_set in self.descriptor_buffers.iter() {
-			// 	device.device.cmd_update_buffer(*command_buffer, descriptor_set.buffer, 0, data);
-			// 	let descriptor_buffer_info = vk::DescriptorBufferInfo::builder()
-			// 		.buffer(descriptor_set.buffer)
-			// 		.offset(0)
-			// 		.range(self.descriptor_size as u64)
-			// 		.build();
-			// 	let write_descriptor_set = vk::WriteDescriptorSet::builder()
-			// 		.dst_set(descriptor_set.set)
-			// 		.dst_binding(self.binding)
-			// 		.dst_array_element(0)
-			// 		.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-			// 		.buffer_info(&[descriptor_buffer_info])
-			// 		.build();
-			// 	device.device.update_descriptor_sets(
-			// 		&[write_descriptor_set],
-			// 		&[],
-			// 	);
-			// }
-		}
+		(descriptor_sets, descriptor_writes)
 	}}
 }
