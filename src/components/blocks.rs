@@ -50,6 +50,7 @@ impl BlockState {
 			frame_count,
 			&frame_sets,
 			descriptor_size,
+			binding,
 		);
 		for (i, frame_set) in frame_sets.iter_mut().enumerate() {
 			frame_set.set = descriptor_sets[i];
@@ -123,6 +124,7 @@ impl BlockState {
 			frame_count,
 			&self.frame_sets,
 			self.descriptor_size,
+			self.binding,
 		);
 		for (i, frame_set) in self.frame_sets.iter_mut().enumerate() {
 			frame_set.set = descriptor_sets[i];
@@ -190,6 +192,7 @@ impl BlockState {
 		frame_count: usize,
 		frame_sets: &Vec<FrameSet>,
 		descriptor_size: usize,
+		binding: u32,
 	) -> (Vec<vk::DescriptorSet>, Vec<vk::WriteDescriptorSet>) { unsafe {
 		let layouts = vec![
 			*descriptor_set_layout;
@@ -212,7 +215,7 @@ impl BlockState {
 			let buffer_info = &[info];
 			let write = vk::WriteDescriptorSet::builder()
 				.dst_set(*descriptor_set)
-				.dst_binding(0)
+				.dst_binding(binding)
 				.dst_array_element(0)
 				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
 				.buffer_info(buffer_info)
