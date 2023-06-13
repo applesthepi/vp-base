@@ -41,6 +41,19 @@ impl<'a, V: Vertex + Copy> VertexBufferCGO<'a, V> {
 			buffer_memory_gpu: buffer_memory,
 		}
 	}}
+
+	pub fn update(
+		&self,
+		device: &Device,
+		vertices: &'a [V],
+	) {
+		update_buffer(
+			device,
+			vertices,
+			self.buffer_gpu,
+			self.buffer_memory_gpu,
+		);
+	}
 }
 
 impl<'a, V: Vertex + Copy> VertexBuffer for VertexBufferCGO<'a, V> {
@@ -77,6 +90,19 @@ impl VertexBufferGO {
 			buffer_memory_gpu: buffer_memory,
 		}
 	}}
+
+	pub fn update<V: Vertex + Copy>(
+		&self,
+		device: &Device,
+		vertices: &[V],
+	) {
+		update_buffer(
+			device,
+			vertices,
+			self.buffer_gpu,
+			self.buffer_memory_gpu,
+		);
+	}
 }
 
 impl VertexBuffer for VertexBufferGO {
@@ -123,6 +149,24 @@ fn generate_buffer<V: Vertex + Copy>(
 		&allocate_info,
 		None,
 	).unwrap();
+	update_buffer(
+		device,
+		vertices,
+		buffer,
+		buffer_memory,
+	);
+	(buffer, buffer_memory)
+}}
+
+fn update_buffer<V: Vertex + Copy>(
+	device: &Device,
+	vertices: &[V],
+	buffer: vk::Buffer,
+	buffer_memory: vk::DeviceMemory,
+) { unsafe {
+	let buffer_requirements = device.device.get_buffer_memory_requirements(
+		buffer,
+	);
 	let mapped_memory = device.device.map_memory(
 		buffer_memory,
 		0,
@@ -138,5 +182,4 @@ fn generate_buffer<V: Vertex + Copy>(
 	device.device.unmap_memory(
 		buffer_memory,
 	);
-	(buffer, buffer_memory)
 }}

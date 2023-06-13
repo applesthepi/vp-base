@@ -43,6 +43,19 @@ impl<'a> IndexBufferCGO<'a> {
 			buffer_memory_gpu: buffer_memory,
 		}
 	}}
+
+	pub fn update(
+		&self,
+		device: &Device,
+		indices: &'a [u32],
+	) {
+		update_buffer(
+			device,
+			indices,
+			self.buffer_gpu,
+			self.buffer_memory_gpu,
+		);
+	}
 }
 
 impl<'a> IndexBuffer for IndexBufferCGO<'a> {
@@ -83,6 +96,19 @@ impl IndexBufferGO {
 			buffer_memory_gpu: buffer_memory,
 		}
 	}}
+
+	pub fn update(
+		&self,
+		device: &Device,
+		vertices: &[u32],
+	) {
+		update_buffer(
+			device,
+			vertices,
+			self.buffer_gpu,
+			self.buffer_memory_gpu,
+		);
+	}
 }
 
 impl IndexBuffer for IndexBufferGO {
@@ -148,4 +174,30 @@ fn generate_buffer(
 		buffer_memory,
 	);
 	(buffer, buffer_memory)
+}}
+
+fn update_buffer(
+	device: &Device,
+	indices: &[u32],
+	buffer: vk::Buffer,
+	buffer_memory: vk::DeviceMemory,
+) { unsafe {
+	let buffer_requirements = device.device.get_buffer_memory_requirements(
+		buffer,
+	);
+	let mapped_memory = device.device.map_memory(
+		buffer_memory,
+		0,
+		buffer_requirements.size,
+		vk::MemoryMapFlags::empty(),
+	).unwrap();
+	let mut buffer_align = Align::new(
+		mapped_memory,
+		align_of::<u32>() as u64,
+		buffer_requirements.size,
+	);
+	buffer_align.copy_from_slice(indices);
+	device.device.unmap_memory(
+		buffer_memory,
+	);
 }}

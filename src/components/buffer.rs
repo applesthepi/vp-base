@@ -6,6 +6,8 @@ use crate::{Device, Instance};
 
 pub struct Buffer<T> {
 	pub data: Vec<T>,
+	pub buffer: vk::Buffer,
+	pub memory: vk::DeviceMemory,
 }
 
 impl<T> Buffer<T>
@@ -90,12 +92,12 @@ where
 			.allocation_size(buffer_memory_requirement.size)
 			.memory_type_index(buffer_memory_index)
 			.build();
-		let buffer_memory = device.device.allocate_memory(
+		let memory = device.device.allocate_memory(
 			&allocate_info,
 			None,
 		).unwrap();
 		let buffer_ptr = device.device.map_memory(
-			buffer_memory,
+			memory,
 			0,
 			buffer_memory_requirement.size,
 			vk::MemoryMapFlags::empty(),
@@ -106,14 +108,16 @@ where
 			buffer_memory_requirement.size,
 		);
 		buffer_slice.copy_from_slice(data.as_slice());
-		device.device.unmap_memory(buffer_memory);
+		device.device.unmap_memory(memory);
 		device.device.bind_buffer_memory(
 			buffer,
-			buffer_memory,
+			memory,
 			0,
 		).unwrap();
 		Self {
 			data,
+			buffer,
+			memory,
 		}
 	}}
 }
