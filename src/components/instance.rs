@@ -97,16 +97,16 @@ unsafe extern "system" fn debug_callback(
 		 CStr::from_ptr(callback_data.p_message).to_string_lossy()
 	};
 
+	println!(
+		 "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
+	);
+
 	match message_severity {
 		DebugUtilsMessageSeverityFlagsEXT::ERROR => {
 			println!("E");
 		},
 		_ => {}
 	}
-
-	println!(
-		 "{message_severity:?}:\n{message_type:?} [{message_id_name} ({message_id_number})] : {message}\n",
-	);
 
 	vk::FALSE
 }
