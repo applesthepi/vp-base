@@ -28,6 +28,8 @@ impl Device {
 		let features: vk::PhysicalDeviceFeatures =
 			vk::PhysicalDeviceFeatures {
 				shader_clip_distance: 1,
+				multi_draw_indirect: 1,
+				fill_mode_non_solid: 1,
 				..Default::default()
 			};
 		let pdevices =
