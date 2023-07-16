@@ -1,4 +1,5 @@
 use ash::{vk, extensions::khr};
+use glfw::Context;
 
 use crate::{Device, Window, Instance, Surface};
 
@@ -16,6 +17,7 @@ impl Swapchain {
 		surface: &Surface,
 		device: &Device,
 	) -> Self { unsafe {
+		window.window.make_current();
 		let present_queue = device.device.get_device_queue(
 			device.queue_family_index[0],
 			0

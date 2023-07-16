@@ -23,7 +23,6 @@ impl Window {
 			.create_window(extent.width, extent.height, title, glfw::WindowMode::Windowed)
 			.expect("failed to create glfw window");
 		window.set_key_polling(true);
-		window.make_current();
 		Self {
 			extent,
 			glfw,
