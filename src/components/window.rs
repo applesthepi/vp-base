@@ -1,33 +1,34 @@
-use std::marker::PhantomData;
+use std::sync::mpsc::Receiver;
 
 use ash::vk;
-use winit::{event_loop::EventLoop, window::WindowBuilder, dpi::LogicalSize};
+use glfw::{Context, WindowEvent, Glfw};
 
 pub struct Window {
 	pub extent: vk::Extent2D,
-	pub window: winit::window::Window,
+	pub glfw: Glfw,
+	pub window: glfw::Window,
+	pub events: Receiver<(f64, WindowEvent)>,
 }
 
 impl Window {
 	pub fn new(
 		title: &str,
-		event_loop: &EventLoop<()>,
 	) -> Self {
 		let extent = vk::Extent2D {
 			width: 1280,
 			height: 720,
 		};
-		let window = WindowBuilder::new()
-			.with_title(title)
-			.with_inner_size(LogicalSize::new(
-				extent.width as f64,
-				extent.height as f64,
-			))
-			.build(event_loop)
-			.unwrap();
+		let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
+		let (mut window, events) = glfw
+			.create_window(extent.width, extent.height, title, glfw::WindowMode::Windowed)
+			.expect("failed to create glfw window");
+		window.set_key_polling(true);
+		window.make_current();
 		Self {
 			extent,
+			glfw,
 			window,
+			events,
 		}
 	}
 }
