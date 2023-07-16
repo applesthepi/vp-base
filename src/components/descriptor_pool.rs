@@ -13,7 +13,7 @@ impl DescriptorPool {
 		device: &Device,
 		frame_count: usize,
 	) -> Self { unsafe {
-		let descriptor_pool_max = 4096 * frame_count as u32;
+		let descriptor_pool_max = 1024 * frame_count as u32;
 		let descriptor_pool_size = vk::DescriptorPoolSize::builder()
 			.descriptor_count(descriptor_pool_max)
 			.build();
