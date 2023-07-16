@@ -27,10 +27,14 @@ impl Instance {
 				|raw_name|
 				raw_name.as_ptr()
 			).collect();
-		let mut extension_names = ash_window::enumerate_required_extensions(
-			window.window.raw_display_handle()
-		).unwrap().to_vec();
-		extension_names.push(DebugUtils::name().as_ptr());
+		let required_extensions = window.glfw.get_required_instance_extensions().unwrap_or(vec![]);
+		assert!(required_extensions.contains(&"VK_KHR_surface".to_string()));
+		let extensions: Vec<std::ffi::CString> = required_extensions
+			.iter()
+			.map(|ext| std::ffi::CString::new(ext.clone()).expect("Failed to convert extension name"))
+			.collect();
+		let mut extension_pointers: Vec<*const i8> = extensions.iter().map(|ext| ext.as_ptr()).collect();
+		extension_pointers.push(DebugUtils::name().as_ptr());
 		let name_cstr = CStr::from_bytes_with_nul_unchecked(name.as_bytes());
 		let engine_name_cstr = CStr::from_bytes_with_nul_unchecked(engine_name.as_bytes());
 		let entry = ash::Entry::linked();
@@ -43,7 +47,7 @@ impl Instance {
 		let instance_info = vk::InstanceCreateInfo::builder()
 			.application_info(&application_info)
 			.enabled_layer_names(&layer_names_raw)
-			.enabled_extension_names(&extension_names)
+			.enabled_extension_names(&extension_pointers)
 			.build();
 		let instance = entry.create_instance(
 			&instance_info,

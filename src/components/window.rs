@@ -19,10 +19,12 @@ impl Window {
 			height: 720,
 		};
 		let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
+		glfw.window_hint(glfw::WindowHint::ClientApi(glfw::ClientApiHint::NoApi));
 		let (mut window, events) = glfw
 			.create_window(extent.width, extent.height, title, glfw::WindowMode::Windowed)
 			.expect("failed to create glfw window");
 		window.set_key_polling(true);
+		assert!(glfw.vulkan_supported());
 		Self {
 			extent,
 			glfw,

@@ -17,7 +17,6 @@ impl Swapchain {
 		surface: &Surface,
 		device: &Device,
 	) -> Self { unsafe {
-		window.window.make_current();
 		let present_queue = device.device.get_device_queue(
 			device.queue_family_index[0],
 			0
@@ -73,7 +72,7 @@ impl Swapchain {
 			.composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
 			.present_mode(present_mode)
 			.clipped(true)
-			.image_array_layers(1);
+			.image_array_layers(1).build();
 		let swapchain = swapchain_loader.create_swapchain(
 			&swapchain_info,
 			None,
