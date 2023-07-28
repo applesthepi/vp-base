@@ -1,24 +1,22 @@
+
 use ash::vk;
 
-use crate::{Vertex, Device, VertexBuffer, IndexBuffer, BufferGO, Instance};
+use crate::{Vertex, Device, VertexBuffer, BufferGO, Instance, IndexBuffer};
 
 #[allow(non_camel_case_types)]
-/// Vertex, index, and indirect buffers with gpu only memory (nothing cached).
-pub struct GO_Indirect {
+/// Vertex buffer with gpu only memory (nothing cached).
+pub struct GO_Indexed {
 	pub index_count: usize,
-	pub indirect_count: usize,
 	pub vb: BufferGO,
 	pub ib: BufferGO,
-	pub indirect: BufferGO,
 }
 
-impl GO_Indirect {
+impl GO_Indexed {
 	pub fn new<V: Default + Copy + Clone>(
 		instance: &Instance,
 		device: &Device,
 		vertices: &[V],
 		indices: &[u32],
-		indirect: &[vk::DrawIndexedIndirectCommand],
 	) -> Self {
 		let mut vb = BufferGO::new::<V>(
 			instance,
@@ -34,19 +32,10 @@ impl GO_Indirect {
 			indices.len(),
 		);
 		ib.update(instance, device, indices);
-		let mut indirect_b = BufferGO::new::<vk::DrawIndexedIndirectCommand>(
-			instance,
-			device,
-			vk::BufferUsageFlags::INDIRECT_BUFFER,
-			indirect.len(),
-		);
-		indirect_b.update(instance, device, indirect);
 		Self {
-			index_count: indices.len(),
-			indirect_count: indirect.len(),
 			vb,
 			ib,
-			indirect: indirect_b,
+			index_count: indices.len(),
 		}
 	}
 
@@ -68,19 +57,9 @@ impl GO_Indirect {
 		self.index_count = indices.len();
 		self.ib.update(instance, device, indices);
 	}
-
-	pub fn update_indirect(
-		&mut self,
-		instance: &Instance,
-		device: &Device,
-		indirect: &[vk::DrawIndexedIndirectCommand],
-	) {
-		self.indirect_count = indirect.len();
-		self.indirect.update(instance, device, indirect);
-	}
 }
 
-impl VertexBuffer for GO_Indirect {
+impl VertexBuffer for GO_Indexed {
 	fn bind(
 		&self,
 		device: &Device,
@@ -95,7 +74,7 @@ impl VertexBuffer for GO_Indirect {
 	}}
 }
 
-impl IndexBuffer for GO_Indirect {
+impl IndexBuffer for GO_Indexed {
 	fn bind(
 		&self,
 		device: &Device,

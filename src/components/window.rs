@@ -23,7 +23,8 @@ impl Window {
 		let (mut window, events) = glfw
 			.create_window(extent.width, extent.height, title, glfw::WindowMode::Windowed)
 			.expect("failed to create glfw window");
-		window.set_key_polling(true);
+		// window.set_key_polling(true);
+		window.set_all_polling(true);
 		assert!(glfw.vulkan_supported());
 		Self {
 			extent,

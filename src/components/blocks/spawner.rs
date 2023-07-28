@@ -66,6 +66,52 @@ impl<B: Block> BlockSpawnerGen for BlockSpawner<B> {
 	}
 }
 
+pub struct BlockSpawnerExist<B: Block> {
+	_phantom: PhantomData<B>,
+	layout: vk::DescriptorSetLayout,
+	binding: u32,
+	set: u32,
+}
+
+impl<B: Block> BlockSpawnerExist<B> {
+	pub fn new(
+		spawner: Box<BlockSpawner<B>>,
+	) -> Self {
+		Self {
+			_phantom: PhantomData,
+			layout: spawner.layout,
+			binding: spawner.binding,
+			set: spawner.set,
+		}
+	}
+}
+
+impl<B: Block> BlockSpawnerGen for BlockSpawnerExist<B> {
+	fn spawn(
+		&self,
+		device: &Device,
+		instance: &Instance,
+		descriptor_pool: &vk::DescriptorPool,
+		frame_count: usize,
+	) -> Arc<BlockState> {
+		B::create_block_state(
+			device,
+			instance,
+			descriptor_pool,
+			&self.layout,
+			frame_count,
+			self.binding,
+			self.set,
+		)
+	}
+
+	fn layout(
+		&self,
+	) -> vk::DescriptorSetLayout {
+		self.layout
+	}
+}
+
 pub trait Block {
 	fn create_block_state(
 		device: &Device,

@@ -1,107 +1,116 @@
 use ash::vk;
 
-use crate::{Vertex, Device, VertexBuffer, IndexBuffer, InstanceBuffer};
-
-use super::{update_vertex_buffer, generate_vertex_buffer, generate_indirect_buffer, update_indirect_buffer, update_index_buffer, generate_index_buffer, generate_instance_buffer, update_instance_buffer};
+use crate::{Vertex, Device, VertexBuffer, IndexBuffer, InstanceBuffer, BufferGO, Instance};
 
 #[allow(non_camel_case_types)]
 /// Vertex, index, and indirect buffers with gpu only memory (nothing cached).
 pub struct GO_Instanced {
 	pub index_count: usize,
 	pub instance_count: usize,
-	pub vb_gpu: vk::Buffer,
-	pub vb_memory_gpu: vk::DeviceMemory,
-	pub ib_gpu: vk::Buffer,
-	pub ib_memory_gpu: vk::DeviceMemory,
-	pub instance_gpu: vk::Buffer,
-	pub instance_memory_gpu: vk::DeviceMemory,
+	pub vb: BufferGO,
+	pub ib: BufferGO,
+	pub instance: BufferGO,
 }
 
 impl GO_Instanced {
-	pub fn new<V: Vertex + Copy, VI: Copy>(
+	pub fn new<V: Default + Copy + Clone, VI: Default + Copy + Clone>(
+		instance: &Instance,
 		device: &Device,
-		vertices_data: &[V],
-		indices_data: &[u32],
-		instance_data: &[VI],
-	) -> Self { unsafe {
-		let (vb, vb_memory) = generate_vertex_buffer(
-			device,
-			vertices_data,
-		);
-		device.device.bind_buffer_memory(
-			vb,
-			vb_memory,
-			0,
-		).unwrap();
-		let (ib, ib_memory) = generate_index_buffer(
-			device,
-			indices_data,
-		);
-		device.device.bind_buffer_memory(
-			ib,
-			ib_memory,
-			0,
-		).unwrap();
-		let (instance, instance_memory) = generate_instance_buffer(
-			device,
-			instance_data,
-		);
-		device.device.bind_buffer_memory(
+		vertices: &[V],
+		indices: &[u32],
+		instances: &[VI],
+	) -> Self {
+		let mut vb = BufferGO::new::<V>(
 			instance,
-			instance_memory,
-			0,
-		).unwrap();
+			device,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			vertices.len(),
+		);
+		vb.update(instance, device, vertices);
+		let mut ib = BufferGO::new::<u32>(
+			instance,
+			device,
+			vk::BufferUsageFlags::INDEX_BUFFER,
+			indices.len(),
+		);
+		ib.update(instance, device, indices);
+		let mut instance_b = BufferGO::new::<VI>(
+			instance,
+			device,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			instances.len(),
+		);
+		instance_b.update(instance, device, instances);
 		Self {
-			index_count: indices_data.len(),
-			instance_count: instance_data.len(),
-			vb_gpu: vb,
-			vb_memory_gpu: vb_memory,
-			ib_gpu: ib,
-			ib_memory_gpu: ib_memory,
-			instance_gpu: instance,
-			instance_memory_gpu: instance_memory,
+			index_count: indices.len(),
+			instance_count: instances.len(),
+			vb,
+			ib,
+			instance: instance_b,
 		}
-	}}
+	}
 
-	pub fn update_vertices<V: Vertex + Copy>(
-		&self,
+	pub fn with_capacity<V: Default + Copy + Clone, VI: Default + Copy + Clone>(
+		instance: &Instance,
+		device: &Device,
+		vertex_count: usize,
+		index_count: usize,
+		instance_count: usize,
+	) -> Self {
+		let vb = BufferGO::new::<V>(
+			instance,
+			device,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			vertex_count,
+		);
+		let ib = BufferGO::new::<u32>(
+			instance,
+			device,
+			vk::BufferUsageFlags::INDEX_BUFFER,
+			index_count,
+		);
+		let instance_b = BufferGO::new::<VI>(
+			instance,
+			device,
+			vk::BufferUsageFlags::VERTEX_BUFFER,
+			instance_count,
+		);
+		Self {
+			index_count: index_count,
+			instance_count: instance_count,
+			vb,
+			ib,
+			instance: instance_b,
+		}
+	}
+
+	pub fn update_vertices<V: Default + Copy + Clone>(
+		&mut self,
+		instance: &Instance,
 		device: &Device,
 		vertices: &[V],
 	) {
-		update_vertex_buffer(
-			device,
-			vertices,
-			self.vb_gpu,
-			self.vb_memory_gpu,
-		);
+		self.vb.update(instance, device, vertices);
 	}
 
 	pub fn update_indices(
 		&mut self,
+		instance: &Instance,
 		device: &Device,
 		indices: &[u32],
 	) {
 		self.index_count = indices.len();
-		update_index_buffer(
-			device,
-			indices,
-			self.ib_gpu,
-			self.ib_memory_gpu,
-		);
+		self.ib.update(instance, device, indices);
 	}
 
-	pub fn update_instance<VI: Copy>(
+	pub fn update_instances<VI: Default + Copy + Clone>(
 		&mut self,
+		instance: &Instance,
 		device: &Device,
-		instance: &[VI],
+		instances: &[VI],
 	) {
-		self.instance_count = instance.len();
-		update_instance_buffer(
-			device,
-			instance,
-			self.instance_gpu,
-			self.instance_memory_gpu,
-		);
+		self.instance_count = instances.len();
+		self.instance.update(instance, device, instances);
 	}
 }
 
@@ -114,7 +123,7 @@ impl VertexBuffer for GO_Instanced {
 		device.device.cmd_bind_vertex_buffers(
 			command_buffer,
 			0,
-			&[self.vb_gpu],
+			&[self.vb.memory.as_ref().unwrap_unchecked().0],
 			&[0],
 		);
 	}}
@@ -128,7 +137,7 @@ impl IndexBuffer for GO_Instanced {
 	) { unsafe {
 		device.device.cmd_bind_index_buffer(
 			command_buffer,
-			self.ib_gpu,
+			self.ib.memory.as_ref().unwrap_unchecked().0,
 			0,
 			vk::IndexType::UINT32,
 		);
@@ -147,7 +156,7 @@ impl InstanceBuffer for GO_Instanced {
 		device.device.cmd_bind_vertex_buffers(
 			command_buffer,
 			1,
-			&[self.instance_gpu],
+			&[self.instance.memory.as_ref().unwrap_unchecked().0],
 			&[0],
 		);
 	}}
