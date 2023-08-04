@@ -1,136 +1,248 @@
-use std::mem::align_of;
+use std::mem::{align_of, size_of};
 
-use ash::{vk, util::Align};
+use ash::{vk::{self, DeviceMemory, MemoryPropertyFlags}, util::Align};
+use bytemuck::{Pod, cast_slice};
+use vk_mem::{AllocationCreateInfo, MemoryUsage, AllocationCreateFlags, Allocation};
 
-use crate::{Device, Instance};
+use crate::{Device, Instance, ProgramData};
 
+#[derive(Clone, Debug)]
+pub enum RequirementType {
+	Buffer(usize, vk::BufferUsageFlags),
+	Image(vk::Extent2D),
+}
+
+#[derive(Clone, Debug)]
+pub enum BufferType {
+	Buffer(BufferTypeBuffer),
+	Image(BufferTypeImage),
+}
+
+#[derive(Clone, Debug)]
+pub struct BufferTypeBuffer {
+	pub buffer: vk::Buffer,
+	pub buffer_offset: usize,
+	pub buffer_allocation: Allocation,
+	pub mapped: *mut u8,
+}
+
+#[derive(Clone, Debug)]
+pub struct BufferTypeImage {
+	pub image: vk::Image,
+	pub image_view: vk::ImageView,
+	pub image_sampler: vk::Sampler,
+	pub image_allocation: Allocation,
+}
+
+#[derive(Clone)]
 pub struct BufferGOMemory(pub vk::Buffer, pub vk::DeviceMemory);
 
+// TODO: staging for host coherent and local for device read only
 pub struct BufferGO {
-	pub memory: Option<BufferGOMemory>,
 	pub count: usize,
 	pub capacity: usize,
-	usage: vk::BufferUsageFlags,
+	pub buffer: BufferType,
+	pub requirement_type: RequirementType,
 }
 
 impl BufferGO {
 	pub fn new<T>(
-		instance: &Instance,
-		device: &Device,
-		usage: vk::BufferUsageFlags,
-		initial_count: usize,
+		program_data: &ProgramData,
+		requirement_type: RequirementType,
 	) -> Self
-	where T: Default + Copy + Clone { unsafe {
-		let buffer_object: BufferGO;
-		if initial_count == 0 {
-			buffer_object = Self {
-				memory: None,
-				count: 0,
-				capacity: initial_count,
-				usage,
-			};
-		} else {
-			let (
-				buffer,
-				memory,
-			) = BufferGO::allocate_buffer::<T>(instance, device, usage, initial_count);
-			buffer_object = Self {
-				memory: Some(BufferGOMemory(buffer, memory)),
-				count: 0,
-				capacity: initial_count,
-				usage,
-			};
+	where T: Default + Copy + Clone {
+		let buffer = allocate(
+			program_data,
+			&requirement_type,
+		);
+		match requirement_type {
+			RequirementType::Buffer(size, _) => {
+				Self {
+					count: 0,
+					capacity: size,
+					buffer,
+					requirement_type,
+				}
+			},
+			RequirementType::Image(extent) => {
+				Self {
+					count: 0,
+					capacity: (extent.width * extent.height * 4) as usize,
+					buffer,
+					requirement_type,
+				}
+			}
 		}
-		buffer_object
-	}}
+	}
 
 	pub fn update<T>(
 		&mut self,
-		instance: &Instance,
-		device: &Device,
+		program_data: &ProgramData,
 		data: &[T],
-	) where T: Default + Copy + Clone { unsafe {
+	) where
+	T: Default + Copy + Clone + Pod { unsafe {
+		if data.is_empty() {
+			self.count = 0;
+			return;
+		}
+		let data: &[u8] = cast_slice(data);
 		if self.capacity < data.len() {
 			let mut n_capacity: usize = self.capacity.max(data.len());
 			while n_capacity < data.len() {
 				n_capacity *= 2;
 			}
-			if let Some(memory) = &self.memory {
-				device.device.destroy_buffer(memory.0, None);
-				device.device.free_memory(memory.1, None);
+			match &self.buffer {
+				BufferType::Buffer(buffer) => {
+					program_data.get_allocator().destroy_buffer(
+						buffer.buffer,
+						&buffer.buffer_allocation,
+					).expect("failed to destroy buffer");
+				},
+				BufferType::Image(image) => {
+					program_data.device.device.destroy_sampler(
+						image.image_sampler,
+						None,
+					);
+					program_data.device.device.destroy_image_view(
+						image.image_view,
+						None,
+					);
+					program_data.get_allocator().destroy_image(
+						image.image,
+						&image.image_allocation,
+					).expect("failed to destroy image");
+				},
 			}
-			let (
-				buffer,
-				memory,
-			) = BufferGO::allocate_buffer::<T>(instance, device, self.usage, n_capacity);
-			self.memory = Some(BufferGOMemory(buffer, memory));
-			self.count = data.len();
+			let buffer = allocate(
+				program_data,
+				&self.requirement_type,
+			);
+			self.buffer = buffer;
 			self.capacity = n_capacity;
 		}
-		if data.is_empty() {
-			self.count = 0;
-			return;
-		}
 		self.count = data.len();
-		let memory = self.memory.as_ref().unwrap_unchecked();
-		let buffer_memory_requirement = device.device.get_buffer_memory_requirements(
-			memory.0,
-		);
-		let buffer_ptr = device.device.map_memory(
-			memory.1,
-			0,
-			buffer_memory_requirement.size,
-			vk::MemoryMapFlags::empty(),
-		).unwrap();
-		let mut buffer_slice = Align::new(
-			buffer_ptr,
-			align_of::<T>() as u64,
-			buffer_memory_requirement.size,
-		);
-		buffer_slice.copy_from_slice(data);
-		device.device.unmap_memory(memory.1);
-	}}
-
-	fn allocate_buffer<T>(
-		instance: &Instance,
-		device: &Device,
-		usage: vk::BufferUsageFlags,
-		count: usize,
-	) -> (vk::Buffer, vk::DeviceMemory)
-	where T: Default + Copy + Clone { unsafe {
-		let buffer_info = vk::BufferCreateInfo::builder()
-			.size(count as u64 * std::mem::size_of::<T>() as u64)
-			.usage(usage)
-			.sharing_mode(vk::SharingMode::EXCLUSIVE)
-			.build();
-		let buffer = device.device.create_buffer(
-			&buffer_info,
-			None,
-		).unwrap();
-		let buffer_memory_requirement = device.device.get_buffer_memory_requirements(
-			buffer,
-		);
-		let device_memory_properties = instance.instance.get_physical_device_memory_properties(
-			device.physical_device
-		);
-		let buffer_memory_index = Device::find_memory_type_index(
-			&buffer_memory_requirement,
-			&device_memory_properties,
-			vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-		);
-		let allocate_info = vk::MemoryAllocateInfo::builder()
-			.allocation_size(buffer_memory_requirement.size)
-			.memory_type_index(buffer_memory_index)
-			.build();
-		let memory = device.device.allocate_memory(
-			&allocate_info,
-			None,
-		).unwrap();
-		device.device.bind_buffer_memory(
-			buffer,
-			memory,
-			0,
-		).unwrap();
-		(buffer, memory)
+		match &self.buffer {
+			BufferType::Buffer(buffer) => {
+				buffer.mapped.copy_from(data.as_ptr(), data.len());
+			},
+			BufferType::Image(image) => { unimplemented!(); },
+		}
 	}}
 }
+
+fn allocate(
+	program_data: &ProgramData,
+	requriement_type: &RequirementType,
+) -> BufferType { unsafe {
+	match requriement_type {
+		RequirementType::Buffer(size, usage_flags) => {
+			let allocation_info = AllocationCreateInfo {
+				usage: MemoryUsage::CpuToGpu,
+				flags: AllocationCreateFlags::MAPPED,
+				required_flags: MemoryPropertyFlags::empty(),
+				preferred_flags: MemoryPropertyFlags::empty(),
+				memory_type_bits: 0,
+				pool: None,
+				user_data: None,
+			};
+			let buffer_info = vk::BufferCreateInfo::builder()
+				.sharing_mode(vk::SharingMode::EXCLUSIVE)
+				.size(*size as u64)
+				.usage(*usage_flags)
+				.build();
+			let (
+				buffer,
+				buffer_allocation,
+				buffer_allocation_info,
+			) = program_data.get_allocator().create_buffer(
+				&buffer_info,
+				&allocation_info,
+			).expect("failed to create buffer");
+			let mapped = buffer_allocation_info.get_mapped_data();
+			let buffer_offset = buffer_allocation_info.get_offset();
+			BufferType::Buffer(BufferTypeBuffer {
+				buffer,
+				buffer_offset,
+				buffer_allocation,
+				mapped,
+			})
+		},
+		RequirementType::Image(extent) => {
+			let allocation_info = AllocationCreateInfo {
+				usage: MemoryUsage::GpuOnly,
+				flags: AllocationCreateFlags::empty(),
+				required_flags: MemoryPropertyFlags::empty(),
+				preferred_flags: MemoryPropertyFlags::empty(),
+				memory_type_bits: 0,
+				pool: None,
+				user_data: None,
+			};
+			let image_info = vk::ImageCreateInfo::builder()
+				.image_type(vk::ImageType::TYPE_2D)
+				.extent(vk::Extent3D::builder().depth(1).width(extent.width).height(extent.height).build())
+				.mip_levels(1)
+				.array_layers(1)
+				.format(vk::Format::R8G8B8A8_SRGB)
+				.tiling(vk::ImageTiling::OPTIMAL)
+				.initial_layout(vk::ImageLayout::UNDEFINED)
+				.usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+				.sharing_mode(vk::SharingMode::EXCLUSIVE)
+				.samples(vk::SampleCountFlags::TYPE_1)
+				.flags(vk::ImageCreateFlags::empty())
+				.build();
+			let (
+				image,
+				image_allocation,
+				image_allocation_info,
+			) = program_data.get_allocator().create_image(
+				&image_info,
+				&allocation_info,
+			).expect("failed to create image");
+
+			// VIEW & SAMPLER
+
+			let image_view_info = vk::ImageViewCreateInfo::builder()
+				.image(image)
+				.view_type(vk::ImageViewType::TYPE_2D)
+				.format(vk::Format::R8G8B8A8_SRGB)
+				.subresource_range(vk::ImageSubresourceRange::builder()
+					.aspect_mask(vk::ImageAspectFlags::COLOR)
+					.base_mip_level(0)
+					.level_count(1)
+					.base_array_layer(0)
+					.layer_count(1)
+					.build())
+				.build();
+			let image_view = program_data.device.device.create_image_view(
+				&image_view_info,
+				None,
+			).expect("failed to create image view");
+			let image_sampler_info = vk::SamplerCreateInfo::builder()
+				.mag_filter(vk::Filter::NEAREST)
+				.min_filter(vk::Filter::NEAREST)
+				.address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+				.address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+				.address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+				.anisotropy_enable(false)
+				.unnormalized_coordinates(false)
+				.compare_enable(false)
+				.compare_op(vk::CompareOp::ALWAYS)
+				.mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+				.mip_lod_bias(0.0)
+				.min_lod(0.0)
+				.max_lod(0.0)
+				.build();
+			let image_sampler = program_data.device.device.create_sampler(
+				&image_sampler_info,
+				None,
+			).expect("failed to create image sampler");
+
+			BufferType::Image(BufferTypeImage {
+				image,
+				image_view,
+				image_sampler,
+				image_allocation,
+			})
+		},
+	}
+}}

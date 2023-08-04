@@ -9,6 +9,10 @@ mod go_indirect;
 pub use go_indirect::*;
 mod go_instanced;
 pub use go_instanced::*;
+mod go_image;
+pub use go_image::*;
+mod go_uniform;
+pub use go_uniform::*;
 
 pub trait VertexBuffer {
 	fn bind(&self, device: &Device, command_buffer: vk::CommandBuffer);

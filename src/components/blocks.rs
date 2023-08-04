@@ -7,66 +7,157 @@ use ash::{vk, util::Align};
 use bytemuck::{Pod, Zeroable, bytes_of};
 use serde::Serialize;
 
-use crate::{Device, Instance};
+use crate::{Device, Instance, GO_Image, program_data, ProgramData, GO_Uniform, BufferType};
 
 mod spawner;
 pub use spawner::*;
 
-#[derive(Clone, Debug)]
-pub struct FrameSet {
-	pub buffer: vk::Buffer,
-	pub memory: vk::DeviceMemory,
-	pub set: vk::DescriptorSet,
-	pub write: vk::WriteDescriptorSet,
-	// pub mapped: *mut c_void,
+pub struct BlockDescriptorData {
+	pub set_id: SetId,
+	pub descriptor_sets: Vec<vk::DescriptorSet>,
+	pub frames: Vec<FrameDescriptorSet>,
 }
 
 #[derive(Clone)]
+pub enum WriteDSInfo {
+	Uniform(Vec<vk::DescriptorBufferInfo>),
+	Image(Vec<vk::DescriptorImageInfo>),
+}
+
+#[derive(Clone)]
+pub struct WriteDS {
+	pub write: vk::WriteDescriptorSet,
+	pub info: WriteDSInfo,
+}
+
+pub struct FrameDescriptorSet {
+	pub descriptor_writes: Vec<WriteDS>,
+	pub descriptors: Vec<FrameDescriptor>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BindingId(pub u32);
+
+#[derive(Clone, Copy, Debug)]
+pub struct SetId(pub u32);
+
+pub struct DescriptorUniform {
+	pub binding_id: BindingId,
+	pub buffer: GO_Uniform,
+	pub size: usize,
+}
+
+pub struct DescriptorImage {
+	pub binding_id: BindingId,
+	pub image: GO_Image,
+}
+
+pub enum FrameDescriptor {
+	Uniform(DescriptorUniform),
+	Image(DescriptorImage)
+}
+
+#[derive(Clone, Debug)]
+pub struct DDTypeUniform {
+	pub binding: BindingId,
+	pub size: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct DDTypeImage {
+	pub binding: BindingId,
+	pub file_abs: String,
+}
+
+#[derive(Clone, Debug)]
+pub enum DDType {
+	Uniform(DDTypeUniform),
+	Image(DDTypeImage),
+}
+
+
+
+#[derive(Clone, Debug)]
+pub struct DescriptorDescription {
+	pub dd_types: Vec<DDType>,
+}
+
+impl DescriptorDescription {
+	pub fn new(
+		types: &[DDType],
+	) -> Self {
+		let mut dd_types = Vec::with_capacity(types.len());
+		dd_types.extend_from_slice(types);
+		Self {
+			dd_types,
+		}
+	}
+}
+   
+// TODO: reorginize this for each type of descriptor with all the descriptor sets needed.
+// #[derive(Clone, Debug)]
+// pub struct FrameSet {
+// 	pub buffer: vk::Buffer,
+// 	pub memory: vk::DeviceMemory,
+// 	pub set: vk::DescriptorSet,
+// 	pub writes: Vec<vk::WriteDescriptorSet>,
+// }
+
 pub struct BlockState {
-	pub layout: vk::DescriptorSetLayout,
-	pub frame_sets: Vec<FrameSet>,
-	pub binding: u32,
-	pub set: u32,
-	pub descriptor_size: usize,
+	pub layouts: Vec<vk::DescriptorSetLayout>,
+	pub descriptor_data: BlockDescriptorData,
+	pub descriptor_description: DescriptorDescription,
 }
 
 impl BlockState {
 	pub fn new(
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		descriptor_set_layout: &vk::DescriptorSetLayout,
 		frame_count: usize,
-		binding: u32,
-		set: u32,
-		descriptor_size: usize,
-		descriptor_count: u32,
+		set_id: SetId,
+		descriptor_description: DescriptorDescription,
 	) -> Self { unsafe {
-		let mut frame_sets = BlockState::create_frame_sets(
-			device,
-			instance,
+
+		// OTS CMD BUFFER
+		
+		let cmd_alloc_info = vk::CommandBufferAllocateInfo::builder()
+			.level(vk::CommandBufferLevel::PRIMARY)
+			.command_pool(program_data.command_pool.command_pool)
+			.command_buffer_count(1)
+			.build();
+		let cmd_buffer = *program_data.device.device.allocate_command_buffers(&cmd_alloc_info).unwrap().first().unwrap_unchecked();
+		let cmd_begin_info = vk::CommandBufferBeginInfo::builder()
+			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+			.build();
+		program_data.device.device.begin_command_buffer(cmd_buffer, &cmd_begin_info).unwrap();
+
+		// BUFFERS & WRITES
+
+		let mut descriptor_data = BlockState::create_buffers(
+			program_data,
+			cmd_buffer,
 			frame_count,
-			descriptor_size,
+			&descriptor_description,
+			set_id,
 		);
-		let (descriptor_sets, descriptor_writes) = BlockState::create_descriptor_sets(
-			device,
-			descriptor_pool,
+		let layouts = BlockState::create_writes(
+			program_data,
 			descriptor_set_layout,
 			frame_count,
-			&frame_sets,
-			descriptor_size,
-			binding,
+			&mut descriptor_data,
 		);
-		for (i, frame_set) in frame_sets.iter_mut().enumerate() {
-			frame_set.set = descriptor_sets[i];
-			frame_set.write = descriptor_writes[i];
-		}
+
+		// SUBMIT OTS CMD BUFFER
+
+		program_data.device.device.end_command_buffer(cmd_buffer).unwrap();
+		let submit_info = vk::SubmitInfo::builder()
+			.command_buffers(&[cmd_buffer])
+			.build();
+		program_data.device.device.queue_submit(program_data.swapchain.present_queue, &[submit_info], vk::Fence::null()).unwrap();
 		Self {
-			layout: *descriptor_set_layout,
-			frame_sets,
-			binding,
-			set,
-			descriptor_size,
+			layouts,
+			descriptor_data,
+			descriptor_description,
 		}
 	}}
 
@@ -78,159 +169,268 @@ impl BlockState {
 	) { unsafe {
 		// let data = bytes_of(data);
 		if let Some(frame) = frame {
-			let memory = device.device.map_memory(
-				self.frame_sets[frame].memory,
-				0,
-				self.descriptor_size as u64,
-				vk::MemoryMapFlags::empty(),
-			).unwrap();
-			memcpy(data, memory.cast(), 1);
-			device.device.unmap_memory(
-				self.frame_sets[frame].memory,
-			);
+			let frame = &self.descriptor_data.frames[frame];
+			for descriptor in frame.descriptors.iter() {
+				match descriptor {
+					FrameDescriptor::Uniform(uniform) => {
+						match &uniform.buffer.buffer.buffer {
+							BufferType::Buffer(buffer) => {
+								memcpy(data, buffer.mapped.cast(), 1);
+							},
+							BufferType::Image(_) => unreachable!(),
+						}
+					},
+					FrameDescriptor::Image(_) => {},
+				}
+			}
 		} else {
-			panic!("non frame specific descriptor set updating is not finished; must specify a frame.");
+			unimplemented!("non frame specific descriptor set updating is not finished; must specify a frame.");
 		}
 	}}
 
 	pub fn destroy_memory(
 		&mut self,
-		device: &Device,
+		program_data: &ProgramData,
 	) { unsafe {
-		for frame_set in self.frame_sets.iter_mut() {
-			device.device.free_memory(
-				frame_set.memory,
-				None,
-			);
-			device.device.destroy_buffer(
-				frame_set.buffer,
-				None,
-			);
+		for frame_set in self.descriptor_data.frames.iter_mut() {
+			for descriptor in frame_set.descriptors.iter() {
+				match descriptor {
+					FrameDescriptor::Uniform(uniform) => {
+						let buffer = match &uniform.buffer.buffer.buffer {
+							BufferType::Buffer(buffer) => buffer,
+							BufferType::Image(_) => unreachable!(),
+						};
+						program_data.get_allocator().destroy_buffer(
+							buffer.buffer,
+							&buffer.buffer_allocation,
+						);
+					},
+					FrameDescriptor::Image(_) => {},
+				}
+			}
 		}
 	}}
 
 	pub fn recreate_memory(
 		&mut self,
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		frame_count: usize,
 	) { unsafe {
-		self.frame_sets = BlockState::create_frame_sets(
-			device,
-			instance,
+		
+		// OTS CMD BUFFER
+
+		let cmd_alloc_info = vk::CommandBufferAllocateInfo::builder()
+			.level(vk::CommandBufferLevel::PRIMARY)
+			.command_pool(program_data.command_pool.command_pool)
+			.command_buffer_count(1)
+			.build();
+		let cmd_buffer = *program_data.device.device.allocate_command_buffers(&cmd_alloc_info).unwrap().first().unwrap_unchecked();
+		let cmd_begin_info = vk::CommandBufferBeginInfo::builder()
+			.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+			.build();
+		program_data.device.device.begin_command_buffer(cmd_buffer, &cmd_begin_info).unwrap();
+
+		// RECREATE BUFFERS
+		
+		let mut descriptor_data = BlockState::create_buffers(
+			program_data,
+			cmd_buffer,
 			frame_count,
-			self.descriptor_size,
+			&self.descriptor_description,
+			self.descriptor_data.set_id,
 		);
-		let (descriptor_sets, descriptor_writes) = BlockState::create_descriptor_sets(
-			device,
-			descriptor_pool,
-			&self.layout,
+		let layouts = BlockState::create_writes(
+			program_data,
+			self.layouts.first().unwrap_unchecked(),
 			frame_count,
-			&self.frame_sets,
-			self.descriptor_size,
-			self.binding,
+			&mut descriptor_data,
 		);
-		for (i, frame_set) in self.frame_sets.iter_mut().enumerate() {
-			frame_set.set = descriptor_sets[i];
-			frame_set.write = descriptor_writes[i];
-		}
+		self.descriptor_data = descriptor_data;
+		self.layouts = layouts;
+
+		// SUBMIT OTS CMD BUFFER
+
+		program_data.device.device.end_command_buffer(cmd_buffer).unwrap();
+		let submit_info = vk::SubmitInfo::builder()
+			.command_buffers(&[cmd_buffer])
+			.build();
+		program_data.device.device.queue_submit(program_data.swapchain.present_queue, &[submit_info], vk::Fence::null()).unwrap();
 	}}
 	
-	fn create_frame_sets(
-		device: &Device,
-		instance: &Instance,
+	fn create_buffers(
+		program_data: &ProgramData,
+		cmd_buffer: vk::CommandBuffer,
 		frame_count: usize,
-		descriptor_size: usize,
-	) -> Vec<FrameSet> { unsafe {
-		let mut frame_sets: Vec<FrameSet> = Vec::with_capacity(frame_count);
+		descriptor_description: &DescriptorDescription,
+		set_id: SetId,
+	) -> BlockDescriptorData { unsafe {
+		let mut frames: Vec<FrameDescriptorSet> = Vec::with_capacity(frame_count);
 		for _ in 0..frame_count {
-			let buffer_info = vk::BufferCreateInfo::builder()
-				.size(descriptor_size as u64)
-				.usage(
-					vk::BufferUsageFlags::UNIFORM_BUFFER
-				)
-				.sharing_mode(vk::SharingMode::EXCLUSIVE)
-				.build();
-			let buffer = device.device.create_buffer(
-				&buffer_info,
-				None,
-			).unwrap();
-			let buffer_memory_requirement = device.device.get_buffer_memory_requirements(
-				buffer,
-			);
-			let device_memory_properties = instance.instance.get_physical_device_memory_properties(
-				device.physical_device
-			);
-			let buffer_memory_index = Device::find_memory_type_index(
-				&buffer_memory_requirement,
-				&device_memory_properties,
-				vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-			);
-			let allocate_info = vk::MemoryAllocateInfo::builder()
-				.allocation_size(buffer_memory_requirement.size)
-				.memory_type_index(buffer_memory_index)
-				.build();
-			let memory = device.device.allocate_memory(
-				&allocate_info,
-				None,
-			).unwrap();
-			device.device.bind_buffer_memory(
-				buffer,
-				memory,
-				0,
-			).unwrap();
-			frame_sets.push(FrameSet {
-				buffer,
-				memory,
-				set: vk::DescriptorSet::null(),
-				write: vk::WriteDescriptorSet::default(),
+			let mut descriptors: Vec<FrameDescriptor> = Vec::with_capacity(8);
+			for description in descriptor_description.dd_types.iter() {
+				let frame = match description {
+					DDType::Uniform(dd_type) => {
+						create_uniform_buffer(
+							program_data,
+							dd_type,
+						)
+					},
+					DDType::Image(dd_type) => {
+						create_image_buffer(
+							program_data,
+							&cmd_buffer,
+							dd_type,
+						)
+					},
+				};
+				descriptors.push(frame);
+			}
+			frames.push(FrameDescriptorSet {
+				descriptor_writes: Vec::with_capacity(descriptors.len()),
+				descriptors,
 			});
 		}
-		frame_sets
+		BlockDescriptorData {
+			descriptor_sets: Vec::with_capacity(frames.len()),
+			set_id,
+			frames,
+		}
 	}}
 
-	fn create_descriptor_sets(
-		device: &Device,
-		descriptor_pool: &vk::DescriptorPool,
+	fn create_writes(
+		program_data: &ProgramData,
 		descriptor_set_layout: &vk::DescriptorSetLayout,
 		frame_count: usize,
-		frame_sets: &Vec<FrameSet>,
-		descriptor_size: usize,
-		binding: u32,
-	) -> (Vec<vk::DescriptorSet>, Vec<vk::WriteDescriptorSet>) { unsafe {
+		descriptor_data: &mut BlockDescriptorData,
+	) -> Vec<vk::DescriptorSetLayout> { unsafe {
 		let layouts = vec![
 			*descriptor_set_layout;
 			frame_count
 		];
 		let info = vk::DescriptorSetAllocateInfo::builder()
-			.descriptor_pool(*descriptor_pool)
+			.descriptor_pool(program_data.descriptor_pool.descriptor_pool)
 			.set_layouts(&layouts)
 			.build();
-		let mut descriptor_sets = device.device.allocate_descriptor_sets(
+		descriptor_data.descriptor_sets = program_data.device.device.allocate_descriptor_sets(
 			&info,
 		).unwrap();
-		let mut descriptor_writes = Vec::with_capacity(descriptor_sets.len());
-		for (i, descriptor_set) in descriptor_sets.iter().enumerate() {
-			let info = vk::DescriptorBufferInfo::builder()
-				.buffer(frame_sets[i].buffer)
-				.offset(0)
-				.range(descriptor_size as u64)
-				.build();
-			let buffer_info = &[info];
-			let write = vk::WriteDescriptorSet::builder()
-				.dst_set(*descriptor_set)
-				.dst_binding(binding)
-				.dst_array_element(0)
-				.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-				.buffer_info(buffer_info)
-				.build();
-			device.device.update_descriptor_sets(
-				&[write],
+		for (i, frame) in descriptor_data.frames.iter_mut().enumerate() {
+			for descriptor in frame.descriptors.iter_mut() {
+				let write = match descriptor {
+					FrameDescriptor::Uniform(uniform) => {
+						create_write_uniform(
+							uniform,
+							descriptor_data.descriptor_sets[i],
+						)
+					},
+					FrameDescriptor::Image(image) => {
+						create_write_image(
+							image,
+							descriptor_data.descriptor_sets[i],
+						)
+					},
+					_ => { unimplemented!(); }
+				};
+				frame.descriptor_writes.push(write);
+			}
+			// println!("{:?}", frame.descriptor_writes[0].);
+			let writes: Vec<vk::WriteDescriptorSet> = frame.descriptor_writes.iter().map(
+				|x| x.write
+			).collect();
+			program_data.device.device.update_descriptor_sets(
+				&writes,
 				&[] as &[vk::CopyDescriptorSet],
 			);
-			descriptor_writes.push(write);
 		}
-		(descriptor_sets, descriptor_writes)
+		layouts
 	}}
+}
+
+fn create_uniform_buffer(
+	program_data: &ProgramData,
+	dd_type: &DDTypeUniform,
+) -> FrameDescriptor { unsafe {
+	let mut dummy = Vec::with_capacity(dd_type.size);
+	dummy.resize(dd_type.size, 0u8);
+	let buffer = GO_Uniform::new(
+		program_data,
+		&dummy,
+	);
+	FrameDescriptor::Uniform(DescriptorUniform {
+		binding_id: dd_type.binding,
+		buffer,
+		size: dd_type.size,
+	})
+}}
+
+fn create_image_buffer(
+	program_data: &ProgramData,
+	cmd_buffer: &vk::CommandBuffer,
+	dd_type: &DDTypeImage,
+) -> FrameDescriptor { unsafe {
+	let image = GO_Image::new(
+		program_data,
+		&dd_type.file_abs,
+	);
+	image.transfer(&program_data.device, cmd_buffer);
+	FrameDescriptor::Image(DescriptorImage {
+		binding_id: dd_type.binding,
+		image,
+	})
+}}
+
+fn create_write_uniform(
+	uniform: &mut DescriptorUniform,
+	descriptor_set: vk::DescriptorSet,
+) -> WriteDS {
+	let buffer = match &uniform.buffer.buffer.buffer {
+		BufferType::Buffer(buffer) => buffer,
+		BufferType::Image(_) => unreachable!(),
+	};
+	let info = vk::DescriptorBufferInfo::builder()
+		.buffer(buffer.buffer)
+		.offset(0)
+		.range(uniform.size as u64)
+		.build();
+	let mut ds_info = Vec::with_capacity(1);
+	ds_info.push(info);
+	let write = vk::WriteDescriptorSet::builder()
+		.dst_set(descriptor_set)
+		.dst_binding(uniform.binding_id.0)
+		.dst_array_element(0)
+		.descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+		.buffer_info(&ds_info)
+		.build();
+	WriteDS {
+		write,
+		info: WriteDSInfo::Uniform(ds_info),
+	}
+}
+
+fn create_write_image(
+	image: &mut DescriptorImage,
+	descriptor_set: vk::DescriptorSet,
+) -> WriteDS {
+	let buffer_image = match &image.image.image_buffer.buffer {
+		BufferType::Buffer(_) => unreachable!(),
+		BufferType::Image(image) => image,
+	};
+	let info = vk::DescriptorImageInfo::builder()
+		.image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+		.image_view(buffer_image.image_view)
+		.sampler(buffer_image.image_sampler)
+		.build();
+	let mut ds_info = Vec::with_capacity(1);
+	ds_info.push(info);
+	let write = vk::WriteDescriptorSet::builder()
+		.dst_set(descriptor_set)
+		.dst_binding(image.binding_id.0)
+		.dst_array_element(0)
+		.descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+		.image_info(&ds_info)
+		.build();
+	WriteDS {
+		write,
+		info: WriteDSInfo::Image(ds_info),
+	}
 }

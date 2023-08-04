@@ -2,14 +2,12 @@ use std::{sync::Arc, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{Device, Instance, BlockState};
+use crate::{Device, Instance, BlockState, BindingId, SetId, ProgramData};
 
 pub trait BlockSpawnerGen {
 	fn spawn(
 		&self,
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		frame_count: usize,
 	) -> Arc<BlockState>;
 	
@@ -21,15 +19,15 @@ pub trait BlockSpawnerGen {
 pub struct BlockSpawner<B: Block> {
 	_phantom: PhantomData<B>,
 	layout: vk::DescriptorSetLayout,
-	binding: u32,
-	set: u32,
+	binding: BindingId,
+	set: SetId,
 }
 
 impl<B: Block> BlockSpawner<B> {
 	pub fn new(
 		device: &Arc<Device>,
-		binding: u32,
-		set: u32,
+		binding: BindingId,
+		set: SetId,
 	) -> Self {
 		Self {
 			_phantom: PhantomData,
@@ -43,15 +41,11 @@ impl<B: Block> BlockSpawner<B> {
 impl<B: Block> BlockSpawnerGen for BlockSpawner<B> {
 	fn spawn(
 		&self,
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		frame_count: usize,
 	) -> Arc<BlockState> {
 		B::create_block_state(
-			device,
-			instance,
-			descriptor_pool,
+			program_data,
 			&self.layout,
 			frame_count,
 			self.binding,
@@ -69,8 +63,8 @@ impl<B: Block> BlockSpawnerGen for BlockSpawner<B> {
 pub struct BlockSpawnerExist<B: Block> {
 	_phantom: PhantomData<B>,
 	layout: vk::DescriptorSetLayout,
-	binding: u32,
-	set: u32,
+	binding: BindingId,
+	set: SetId,
 }
 
 impl<B: Block> BlockSpawnerExist<B> {
@@ -89,15 +83,11 @@ impl<B: Block> BlockSpawnerExist<B> {
 impl<B: Block> BlockSpawnerGen for BlockSpawnerExist<B> {
 	fn spawn(
 		&self,
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		frame_count: usize,
 	) -> Arc<BlockState> {
 		B::create_block_state(
-			device,
-			instance,
-			descriptor_pool,
+			program_data,
 			&self.layout,
 			frame_count,
 			self.binding,
@@ -114,17 +104,15 @@ impl<B: Block> BlockSpawnerGen for BlockSpawnerExist<B> {
 
 pub trait Block {
 	fn create_block_state(
-		device: &Device,
-		instance: &Instance,
-		descriptor_pool: &vk::DescriptorPool,
+		program_data: &ProgramData,
 		descriptor_set_layout: &vk::DescriptorSetLayout,
 		frame_count: usize,
-		binding: u32,
-		set: u32,
+		binding: BindingId,
+		set: SetId,
 	) -> Arc<BlockState>;
 
 	fn create_descriptor_set_layout(
 		device: &Arc<Device>,
-		binding: u32,
+		binding: BindingId,
 	) -> vk::DescriptorSetLayout;
 }

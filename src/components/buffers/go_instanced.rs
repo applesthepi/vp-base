@@ -1,6 +1,9 @@
-use ash::vk;
+use std::mem::size_of;
 
-use crate::{Vertex, Device, VertexBuffer, IndexBuffer, InstanceBuffer, BufferGO, Instance};
+use ash::vk;
+use bytemuck::Pod;
+
+use crate::{Vertex, Device, VertexBuffer, IndexBuffer, InstanceBuffer, BufferGO, Instance, RequirementType, ProgramData, BufferType};
 
 #[allow(non_camel_case_types)]
 /// Vertex, index, and indirect buffers with gpu only memory (nothing cached).
@@ -13,34 +16,36 @@ pub struct GO_Instanced {
 }
 
 impl GO_Instanced {
-	pub fn new<V: Default + Copy + Clone, VI: Default + Copy + Clone>(
-		instance: &Instance,
-		device: &Device,
+	pub fn new<V: Default + Copy + Clone + Pod, VI: Default + Copy + Clone + Pod>(
+		program_data: &ProgramData,
 		vertices: &[V],
 		indices: &[u32],
 		instances: &[VI],
 	) -> Self {
 		let mut vb = BufferGO::new::<V>(
-			instance,
-			device,
-			vk::BufferUsageFlags::VERTEX_BUFFER,
-			vertices.len(),
+			program_data,
+			RequirementType::Buffer(
+				size_of::<V>() * vertices.len(),
+				vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
-		vb.update(instance, device, vertices);
+		vb.update(program_data, vertices);
 		let mut ib = BufferGO::new::<u32>(
-			instance,
-			device,
-			vk::BufferUsageFlags::INDEX_BUFFER,
-			indices.len(),
+			program_data,
+			RequirementType::Buffer(
+				size_of::<u32>() * indices.len(),
+				vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
-		ib.update(instance, device, indices);
+		ib.update(program_data, indices);
 		let mut instance_b = BufferGO::new::<VI>(
-			instance,
-			device,
-			vk::BufferUsageFlags::VERTEX_BUFFER,
-			instances.len(),
+			program_data,
+			RequirementType::Buffer(
+				size_of::<VI>() * instances.len(),
+				vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
-		instance_b.update(instance, device, instances);
+		instance_b.update(program_data, instances);
 		Self {
 			index_count: indices.len(),
 			instance_count: instances.len(),
@@ -50,67 +55,66 @@ impl GO_Instanced {
 		}
 	}
 
-	pub fn with_capacity<V: Default + Copy + Clone, VI: Default + Copy + Clone>(
-		instance: &Instance,
-		device: &Device,
-		vertex_count: usize,
-		index_count: usize,
-		instance_count: usize,
+	pub fn with_capacity<V: Default + Copy + Clone + Pod, VI: Default + Copy + Clone + Pod>(
+		program_data: &ProgramData,
+		vertex_capacity: usize,
+		index_capacity: usize,
+		instance_capacity: usize,
 	) -> Self {
-		let vb = BufferGO::new::<V>(
-			instance,
-			device,
-			vk::BufferUsageFlags::VERTEX_BUFFER,
-			vertex_count,
+		let mut vb = BufferGO::new::<V>(
+			program_data,
+			RequirementType::Buffer(
+				size_of::<V>() * vertex_capacity,
+				vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
-		let ib = BufferGO::new::<u32>(
-			instance,
-			device,
-			vk::BufferUsageFlags::INDEX_BUFFER,
-			index_count,
+		let mut ib = BufferGO::new::<u32>(
+			program_data,
+			RequirementType::Buffer(
+				size_of::<u32>() * index_capacity,
+				vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
-		let instance_b = BufferGO::new::<VI>(
-			instance,
-			device,
-			vk::BufferUsageFlags::VERTEX_BUFFER,
-			instance_count,
+		let mut instance_b = BufferGO::new::<VI>(
+			program_data,
+			RequirementType::Buffer(
+				size_of::<VI>() * instance_capacity,
+				vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+			),
 		);
 		Self {
-			index_count: index_count,
-			instance_count: instance_count,
+			index_count: 0,
+			instance_count: 0,
 			vb,
 			ib,
 			instance: instance_b,
 		}
 	}
 
-	pub fn update_vertices<V: Default + Copy + Clone>(
+	pub fn update_vertices<V: Default + Copy + Clone + Pod>(
 		&mut self,
-		instance: &Instance,
-		device: &Device,
+		program_data: &ProgramData,
 		vertices: &[V],
 	) {
-		self.vb.update(instance, device, vertices);
+		self.vb.update(program_data, vertices);
 	}
 
 	pub fn update_indices(
 		&mut self,
-		instance: &Instance,
-		device: &Device,
+		program_data: &ProgramData,
 		indices: &[u32],
 	) {
 		self.index_count = indices.len();
-		self.ib.update(instance, device, indices);
+		self.ib.update(program_data, indices);
 	}
 
-	pub fn update_instances<VI: Default + Copy + Clone>(
+	pub fn update_instances<VI: Default + Copy + Clone + Pod>(
 		&mut self,
-		instance: &Instance,
-		device: &Device,
+		program_data: &ProgramData,
 		instances: &[VI],
 	) {
 		self.instance_count = instances.len();
-		self.instance.update(instance, device, instances);
+		self.instance.update(program_data, instances);
 	}
 }
 
@@ -120,10 +124,17 @@ impl VertexBuffer for GO_Instanced {
 		device: &Device,
 		command_buffer: vk::CommandBuffer,
 	) { unsafe {
+		let buffer = match &self.vb.buffer {
+			BufferType::Buffer(buffer) => buffer,
+			BufferType::Image(_) => unreachable!(),
+		};
+		let offset = buffer.buffer_offset;
+		let buffer = buffer.buffer;
 		device.device.cmd_bind_vertex_buffers(
 			command_buffer,
 			0,
-			&[self.vb.memory.as_ref().unwrap_unchecked().0],
+			&[buffer],
+			// &[offset as u64],
 			&[0],
 		);
 	}}
@@ -135,13 +146,21 @@ impl IndexBuffer for GO_Instanced {
 		device: &Device,
 		command_buffer: vk::CommandBuffer,
 	) { unsafe {
+		let buffer = match &self.ib.buffer {
+			BufferType::Buffer(buffer) => buffer,
+			BufferType::Image(_) => unreachable!(),
+		};
+		let offset = buffer.buffer_offset;
+		let buffer = buffer.buffer;
 		device.device.cmd_bind_index_buffer(
 			command_buffer,
-			self.ib.memory.as_ref().unwrap_unchecked().0,
+			buffer,
+			// offset as u64,
 			0,
 			vk::IndexType::UINT32,
 		);
 	}}
+
 	fn index_count(&self) -> usize {
 		self.index_count
 	}
@@ -153,10 +172,17 @@ impl InstanceBuffer for GO_Instanced {
 		device: &Device,
 		command_buffer: vk::CommandBuffer,
 	) { unsafe {
+		let buffer = match &self.instance.buffer {
+			BufferType::Buffer(buffer) => buffer,
+			BufferType::Image(_) => unreachable!(),
+		};
+		let offset = buffer.buffer_offset;
+		let buffer = buffer.buffer;
 		device.device.cmd_bind_vertex_buffers(
 			command_buffer,
 			1,
-			&[self.instance.memory.as_ref().unwrap_unchecked().0],
+			&[buffer],
+			// &[offset as u64],
 			&[0],
 		);
 	}}

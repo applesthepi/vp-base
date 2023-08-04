@@ -1,6 +1,6 @@
 use std::{ffi::{CStr, c_char}, borrow::Cow, marker::PhantomData};
 
-use ash::{vk::{self, DebugUtilsMessageSeverityFlagsEXT}, extensions::ext::DebugUtils};
+use ash::{vk::{self, DebugUtilsMessageSeverityFlagsEXT, InstanceCreateFlags}, extensions::{ext::DebugUtils, khr::Synchronization2}};
 use raw_window_handle::HasRawDisplayHandle;
 
 use crate::Window;
