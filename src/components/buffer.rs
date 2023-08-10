@@ -2,14 +2,14 @@ use std::mem::{align_of, size_of};
 
 use ash::{vk::{self, DeviceMemory, MemoryPropertyFlags}, util::Align};
 use bytemuck::{Pod, cast_slice};
-use vk_mem::{AllocationCreateInfo, MemoryUsage, AllocationCreateFlags, Allocation};
+use vk_mem::{AllocationCreateInfo, MemoryUsage, AllocationCreateFlags, Allocation, AllocationInfo};
 
 use crate::{Device, Instance, ProgramData};
 
 #[derive(Clone, Debug)]
 pub enum RequirementType {
 	Buffer(usize, vk::BufferUsageFlags),
-	Image(vk::Extent2D),
+	Image(vk::Extent2D, Option<u32>),
 }
 
 #[derive(Clone, Debug)]
@@ -23,6 +23,7 @@ pub struct BufferTypeBuffer {
 	pub buffer: vk::Buffer,
 	pub buffer_offset: usize,
 	pub buffer_allocation: Allocation,
+	pub buffer_allocation_info: AllocationInfo,
 	pub mapped: *mut u8,
 }
 
@@ -64,7 +65,7 @@ impl BufferGO {
 					requirement_type,
 				}
 			},
-			RequirementType::Image(extent) => {
+			RequirementType::Image(extent, layers) => {
 				Self {
 					count: 0,
 					capacity: (extent.width * extent.height * 4) as usize,
@@ -164,10 +165,16 @@ fn allocate(
 				buffer,
 				buffer_offset,
 				buffer_allocation,
+				buffer_allocation_info,
 				mapped,
 			})
 		},
-		RequirementType::Image(extent) => {
+		RequirementType::Image(extent, layers) => {
+			let (
+				view_type,
+				layer_count,
+			) = if let Some(x) = *layers { (vk::ImageViewType::TYPE_2D_ARRAY, x) } else { (vk::ImageViewType::TYPE_2D, 1) };
+
 			let allocation_info = AllocationCreateInfo {
 				usage: MemoryUsage::GpuOnly,
 				flags: AllocationCreateFlags::empty(),
@@ -181,8 +188,8 @@ fn allocate(
 				.image_type(vk::ImageType::TYPE_2D)
 				.extent(vk::Extent3D::builder().depth(1).width(extent.width).height(extent.height).build())
 				.mip_levels(1)
-				.array_layers(1)
-				.format(vk::Format::R8G8B8A8_SRGB)
+				.array_layers(layer_count)
+				.format(vk::Format::R8G8B8A8_UNORM)
 				.tiling(vk::ImageTiling::OPTIMAL)
 				.initial_layout(vk::ImageLayout::UNDEFINED)
 				.usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
@@ -203,14 +210,14 @@ fn allocate(
 
 			let image_view_info = vk::ImageViewCreateInfo::builder()
 				.image(image)
-				.view_type(vk::ImageViewType::TYPE_2D)
-				.format(vk::Format::R8G8B8A8_SRGB)
+				.view_type(view_type)
+				.format(vk::Format::R8G8B8A8_UNORM)
 				.subresource_range(vk::ImageSubresourceRange::builder()
 					.aspect_mask(vk::ImageAspectFlags::COLOR)
 					.base_mip_level(0)
 					.level_count(1)
 					.base_array_layer(0)
-					.layer_count(1)
+					.layer_count(layer_count)
 					.build())
 				.build();
 			let image_view = program_data.device.device.create_image_view(

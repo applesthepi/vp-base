@@ -1,31 +1,32 @@
-use std::fs::File;
+use std::fs::{File, self};
 
 use ash::vk;
 use bytemuck::bytes_of;
 use nalgebra::{Vector2, vector};
 use serde::__private::de;
 
-use crate::{BufferGO, Instance, Device, RequirementType, ProgramData};
+use crate::{BufferGO, Instance, Device, RequirementType, ProgramData, ImageArrayState};
 
 // #[derive(Clone)]
 #[allow(non_camel_case_types)]
 /// Vertex, index, and indirect buffers with gpu only memory (nothing cached).
-pub struct GO_Image {
+pub struct GO_ImageArray {
 	pub image_staging_buffer: Option<BufferGO>,
 	pub image_buffer: BufferGO,
 	pub image_size: Vector2<u32>,
-	pub file_abs: String,
+	pub image_layers: u32,
 }
 
-impl GO_Image {
+impl GO_ImageArray {
 	pub fn new(
 		program_data: &ProgramData,
-		file_name_abs: &str,
-	) -> GO_Image { unsafe {
+		ias: &ImageArrayState,
+	) -> GO_ImageArray { unsafe {
 		let (
 			image_data,
 			image_size,
-		) = GO_Image::load_disk(file_name_abs);
+			image_layers,
+		) = GO_ImageArray::load_disk(ias);
 		let mut image_staging_buffer = BufferGO::new::<u8>(
 			program_data,
 			RequirementType::Buffer(image_data.len(), vk::BufferUsageFlags::TRANSFER_SRC),
@@ -33,27 +34,28 @@ impl GO_Image {
 		image_staging_buffer.update(program_data, &image_data);
 		let image_buffer = BufferGO::new::<u8>(
 			program_data,
-			RequirementType::Image(vk::Extent2D::builder().width(image_size.x).height(image_size.y).build(), None),
+			RequirementType::Image(vk::Extent2D::builder().width(image_size.x).height(image_size.y).build(), Some(image_layers)),
 		);
-		GO_Image {
+		GO_ImageArray {
 			image_staging_buffer: Some(image_staging_buffer),
 			image_buffer,
 			image_size,
-			file_abs: file_name_abs.to_string(),
+			image_layers,
 		}
 	}}
 
-	pub fn update_image(
+	pub fn update_image_array(
 		&mut self,
 		program_data: &ProgramData,
-		file_name_abs: &str,
+		ias: &ImageArrayState,
 	) { unsafe {
-		self.file_abs = file_name_abs.to_string();
 		let (
 			image_data,
 			image_size,
-		) = GO_Image::load_disk(file_name_abs);
+			image_layers,
+		) = GO_ImageArray::load_disk(ias);
 		self.image_size = image_size;
+		self.image_layers = image_layers;
 		if let Some(image_staging_buffer) = &mut self.image_staging_buffer {
 			image_staging_buffer.update(program_data, &image_data);
 		} else {
@@ -86,6 +88,27 @@ impl GO_Image {
 	}
 
 	fn load_disk(
+		ias: &ImageArrayState,
+	) -> (Vec<u8>, Vector2<u32>, u32) {
+		let mut files: Vec<(Vec<u8>, Vector2<u32>)> = Vec::with_capacity(1024);
+		for texture in ias.textures.iter() {
+			files.push(GO_ImageArray::load_disk_single(&texture));
+		}
+		// let paths = fs::read_dir(ias.path).expect("directory does not exist");
+		// for path in paths {
+		// 	let path = path.unwrap().path().display().to_string();
+		// 	files.push(GO_ImageArray::load_disk_single(&path));
+		// }
+		let mut buffer: Vec<u8> = Vec::with_capacity(4096 * files.len());
+		for file in files.iter() {
+			assert!(file.1.x == 32 && file.1.y == 32);
+			assert!(file.0.len() == 4096);
+			buffer.extend_from_slice(file.0.as_slice());
+		}
+		(buffer, vector![32, 32], files.len() as u32)
+	}
+
+	fn load_disk_single(
 		file_name_abs: &str,
 	) -> (Vec<u8>, Vector2<u32>) {
 		let mut decoder = png::Decoder::new(File::open(file_name_abs).expect(
@@ -148,7 +171,7 @@ impl GO_Image {
 				.base_mip_level(0)
 				.level_count(1)
 				.base_array_layer(0)
-				.layer_count(1)
+				.layer_count(self.image_layers)
 				.build())
 			.src_access_mask(src_access_mask)
 			.dst_access_mask(dst_access_mask)
@@ -169,19 +192,23 @@ impl GO_Image {
 		device: &Device,
 		command_buffer: &vk::CommandBuffer,
 	) { unsafe {
-		let region = vk::BufferImageCopy::builder()
-			.buffer_offset(0)
-			.buffer_row_length(0)
-			.buffer_image_height(0)
-			.image_subresource(vk::ImageSubresourceLayers::builder()
-				.aspect_mask(vk::ImageAspectFlags::COLOR)
-				.mip_level(0)
-				.base_array_layer(0)
-				.layer_count(1)
-				.build())
-			.image_offset(vk::Offset3D::builder().x(0).y(0).z(0).build())
-			.image_extent(vk::Extent3D::builder().depth(1).width(self.image_size.x).height(self.image_size.y).build())
-			.build();
+		let mut regions: Vec<vk::BufferImageCopy> = Vec::with_capacity(self.image_layers as usize);
+		for layer in 0..self.image_layers {
+			let region = vk::BufferImageCopy::builder()
+				.buffer_offset((layer * 4096) as u64)
+				.buffer_row_length(0)
+				.buffer_image_height(0)
+				.image_subresource(vk::ImageSubresourceLayers::builder()
+					.aspect_mask(vk::ImageAspectFlags::COLOR)
+					.mip_level(0)
+					.base_array_layer(layer)
+					.layer_count(1)
+					.build())
+				.image_offset(vk::Offset3D::builder().x(0).y(0).z(0).build())
+				.image_extent(vk::Extent3D::builder().depth(1).width(self.image_size.x).height(self.image_size.y).build())
+				.build();
+			regions.push(region);
+		}
 		device.device.cmd_copy_buffer_to_image(
 			*command_buffer,
 			match &self.image_staging_buffer.as_ref().unwrap_unchecked().buffer {
@@ -197,7 +224,7 @@ impl GO_Image {
 				},
 			},
 			vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-			&[region],
+			&regions,
 		);
 	}}
 }

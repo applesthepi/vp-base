@@ -11,6 +11,8 @@ mod go_instanced;
 pub use go_instanced::*;
 mod go_image;
 pub use go_image::*;
+mod go_image_array;
+pub use go_image_array::*;
 mod go_uniform;
 pub use go_uniform::*;
 

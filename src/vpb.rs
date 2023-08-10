@@ -1,4 +1,5 @@
 #![feature(const_trait_impl)]
+#![feature(extend_one)]
 
 mod components;
 pub use components::*;
@@ -6,6 +7,8 @@ mod presentation;
 pub use presentation::*;
 mod program_data;
 pub use program_data::*;
+mod processing;
+pub use processing::*;
 
 // TODO: replace all builders with structs
 

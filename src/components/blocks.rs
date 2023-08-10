@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::mem::size_of;
 use std::sync::Arc;
 use std::{ffi::c_void, mem::align_of, fmt::Display};
 use std::ptr::copy_nonoverlapping as memcpy;
@@ -7,7 +8,7 @@ use ash::{vk, util::Align};
 use bytemuck::{Pod, Zeroable, bytes_of};
 use serde::Serialize;
 
-use crate::{Device, Instance, GO_Image, program_data, ProgramData, GO_Uniform, BufferType};
+use crate::{Device, Instance, GO_Image, program_data, ProgramData, GO_Uniform, BufferType, GO_ImageArray, ImageArrayState};
 
 mod spawner;
 pub use spawner::*;
@@ -52,44 +53,48 @@ pub struct DescriptorImage {
 	pub image: GO_Image,
 }
 
-pub enum FrameDescriptor {
-	Uniform(DescriptorUniform),
-	Image(DescriptorImage)
+pub struct DescriptorImageArray {
+	pub binding_id: BindingId,
+	pub image_array: GO_ImageArray,
 }
 
-#[derive(Clone, Debug)]
+pub enum FrameDescriptor {
+	Uniform(DescriptorUniform),
+	Image(DescriptorImage),
+	ImageArray(DescriptorImageArray),
+}
+
 pub struct DDTypeUniform {
 	pub binding: BindingId,
 	pub size: usize,
 }
 
-#[derive(Clone, Debug)]
 pub struct DDTypeImage {
 	pub binding: BindingId,
 	pub file_abs: String,
 }
 
-#[derive(Clone, Debug)]
+pub struct DDTypeImageArray {
+	pub binding: BindingId,
+	pub ias: ImageArrayState,
+}
+
 pub enum DDType {
 	Uniform(DDTypeUniform),
 	Image(DDTypeImage),
+	ImageArray(DDTypeImageArray),
 }
 
-
-
-#[derive(Clone, Debug)]
 pub struct DescriptorDescription {
 	pub dd_types: Vec<DDType>,
 }
 
 impl DescriptorDescription {
 	pub fn new(
-		types: &[DDType],
+		types: Vec<DDType>,
 	) -> Self {
-		let mut dd_types = Vec::with_capacity(types.len());
-		dd_types.extend_from_slice(types);
 		Self {
-			dd_types,
+			dd_types: types,
 		}
 	}
 }
@@ -161,7 +166,7 @@ impl BlockState {
 		}
 	}}
 
-	pub fn update<T: Copy + Clone>(
+	pub fn update<T: Copy + Clone + Pod + Zeroable>(
 		&self,
 		device: &Device,
 		data: &T,
@@ -175,12 +180,16 @@ impl BlockState {
 					FrameDescriptor::Uniform(uniform) => {
 						match &uniform.buffer.buffer.buffer {
 							BufferType::Buffer(buffer) => {
-								memcpy(data, buffer.mapped.cast(), 1);
+								let bytes = bytemuck::bytes_of(data);
+								buffer.mapped.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+								// let mapped = buffer.buffer_allocation_info.get_mapped_data();
+								// memcpy(data, mapped.cast(), 1);
 							},
 							BufferType::Image(_) => unreachable!(),
 						}
 					},
 					FrameDescriptor::Image(_) => {},
+					FrameDescriptor::ImageArray(_) => {},
 				}
 			}
 		} else {
@@ -206,6 +215,7 @@ impl BlockState {
 						);
 					},
 					FrameDescriptor::Image(_) => {},
+					FrameDescriptor::ImageArray(_) => {},
 				}
 			}
 		}
@@ -282,6 +292,13 @@ impl BlockState {
 							dd_type,
 						)
 					},
+					DDType::ImageArray(dd_type) => {
+						create_image_array_buffer(
+							program_data,
+							&cmd_buffer,
+							dd_type,
+						)
+					},
 				};
 				descriptors.push(frame);
 			}
@@ -326,6 +343,12 @@ impl BlockState {
 					FrameDescriptor::Image(image) => {
 						create_write_image(
 							image,
+							descriptor_data.descriptor_sets[i],
+						)
+					},
+					FrameDescriptor::ImageArray(image_array) => {
+						create_write_image_array(
+							image_array,
 							descriptor_data.descriptor_sets[i],
 						)
 					},
@@ -379,6 +402,22 @@ fn create_image_buffer(
 	})
 }}
 
+fn create_image_array_buffer(
+	program_data: &ProgramData,
+	cmd_buffer: &vk::CommandBuffer,
+	dd_type: &DDTypeImageArray,
+) -> FrameDescriptor { unsafe {
+	let image_array = GO_ImageArray::new(
+		program_data,
+		&dd_type.ias,
+	);
+	image_array.transfer(&program_data.device, cmd_buffer);
+	FrameDescriptor::ImageArray(DescriptorImageArray {
+		binding_id: dd_type.binding,
+		image_array,
+	})
+}}
+
 fn create_write_uniform(
 	uniform: &mut DescriptorUniform,
 	descriptor_set: vk::DescriptorSet,
@@ -425,6 +464,34 @@ fn create_write_image(
 	let write = vk::WriteDescriptorSet::builder()
 		.dst_set(descriptor_set)
 		.dst_binding(image.binding_id.0)
+		.dst_array_element(0)
+		.descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+		.image_info(&ds_info)
+		.build();
+	WriteDS {
+		write,
+		info: WriteDSInfo::Image(ds_info),
+	}
+}
+
+fn create_write_image_array(
+	image_array: &mut DescriptorImageArray,
+	descriptor_set: vk::DescriptorSet,
+) -> WriteDS {
+	let buffer_image = match &image_array.image_array.image_buffer.buffer {
+		BufferType::Buffer(_) => unreachable!(),
+		BufferType::Image(image) => image,
+	};
+	let info = vk::DescriptorImageInfo::builder()
+		.image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+		.image_view(buffer_image.image_view)
+		.sampler(buffer_image.image_sampler)
+		.build();
+	let mut ds_info = Vec::with_capacity(1);
+	ds_info.push(info);
+	let write = vk::WriteDescriptorSet::builder()
+		.dst_set(descriptor_set)
+		.dst_binding(image_array.binding_id.0)
 		.dst_array_element(0)
 		.descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
 		.image_info(&ds_info)
