@@ -92,7 +92,12 @@ impl GO_ImageArray {
 	) -> (Vec<u8>, Vector2<u32>, u32) {
 		let mut files: Vec<(Vec<u8>, Vector2<u32>)> = Vec::with_capacity(1024);
 		for texture in ias.textures.iter() {
-			files.push(GO_ImageArray::load_disk_single(&texture));
+			let mut path = String::with_capacity(ias.path.len() + 1 + texture.len() + 4);
+			path += &ias.path;
+			path += "/";
+			path += &texture;
+			path += ".png";
+			files.push(GO_ImageArray::load_disk_single(&path));
 		}
 		// let paths = fs::read_dir(ias.path).expect("directory does not exist");
 		// for path in paths {
