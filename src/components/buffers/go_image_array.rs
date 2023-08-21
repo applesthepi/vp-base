@@ -104,13 +104,13 @@ impl GO_ImageArray {
 		// 	let path = path.unwrap().path().display().to_string();
 		// 	files.push(GO_ImageArray::load_disk_single(&path));
 		// }
-		let mut buffer: Vec<u8> = Vec::with_capacity(4096 * files.len());
+		let mut buffer: Vec<u8> = Vec::with_capacity(1024 * files.len());
 		for file in files.iter() {
-			assert!(file.1.x == 32 && file.1.y == 32);
-			assert!(file.0.len() == 4096);
+			assert!(file.1.x == 16 && file.1.y == 16);
+			assert!(file.0.len() == 1024);
 			buffer.extend_from_slice(file.0.as_slice());
 		}
-		(buffer, vector![32, 32], files.len() as u32)
+		(buffer, vector![16, 16], files.len() as u32)
 	}
 
 	fn load_disk_single(
@@ -200,7 +200,7 @@ impl GO_ImageArray {
 		let mut regions: Vec<vk::BufferImageCopy> = Vec::with_capacity(self.image_layers as usize);
 		for layer in 0..self.image_layers {
 			let region = vk::BufferImageCopy::builder()
-				.buffer_offset((layer * 4096) as u64)
+				.buffer_offset((layer * 1024) as u64)
 				.buffer_row_length(0)
 				.buffer_image_height(0)
 				.image_subresource(vk::ImageSubresourceLayers::builder()

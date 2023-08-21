@@ -98,6 +98,12 @@ impl BufferGO {
 						buffer.buffer,
 						&buffer.buffer_allocation,
 					).expect("failed to destroy buffer");
+					match &mut self.requirement_type {
+						RequirementType::Buffer(size, _) => {
+							*size = data.len();
+						},
+						RequirementType::Image(_, _) => unreachable!(),
+					}
 				},
 				BufferType::Image(image) => {
 					program_data.device.device.destroy_sampler(

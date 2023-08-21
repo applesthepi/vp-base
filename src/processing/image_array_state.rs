@@ -37,7 +37,7 @@ impl ImageArrayState {
 	) {
 		let mut ias_path = String::from_str(&self.path).unwrap();
 		ias_path += "/ias.txt";
-		let mut ias: Vec<u8> = Vec::with_capacity(4096);
+		let mut ias: Vec<u8> = Vec::with_capacity(1024);
 		for texture in self.textures {
 			ias.extend_from_slice(texture.as_bytes());
 			ias.extend_one('\n' as u8);
