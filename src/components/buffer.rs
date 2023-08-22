@@ -132,7 +132,7 @@ impl BufferGO {
 			BufferType::Buffer(buffer) => {
 				buffer.mapped.copy_from(data.as_ptr(), data.len());
 			},
-			BufferType::Image(image) => { unimplemented!(); },
+			BufferType::Image(_) => { unimplemented!(); },
 		}
 	}}
 }

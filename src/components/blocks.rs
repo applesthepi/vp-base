@@ -212,10 +212,46 @@ impl BlockState {
 						program_data.get_allocator().destroy_buffer(
 							buffer.buffer,
 							&buffer.buffer_allocation,
-						);
+						).unwrap();
 					},
-					FrameDescriptor::Image(_) => {},
-					FrameDescriptor::ImageArray(_) => {},
+					FrameDescriptor::Image(image) => {
+						match &image.image.image_buffer.buffer {
+							BufferType::Buffer(_) => unreachable!(),
+							BufferType::Image(image) => {
+								program_data.device.device.destroy_image_view(
+									image.image_view,
+									None,
+								);
+								program_data.get_allocator().destroy_image(
+									image.image,
+									&image.image_allocation,
+								).unwrap();
+								program_data.device.device.destroy_sampler(
+									image.image_sampler,
+									None,
+								);
+							},
+						}
+					},
+					FrameDescriptor::ImageArray(image_array) => {
+						match &image_array.image_array.image_buffer.buffer {
+							BufferType::Buffer(_) => unreachable!(),
+							BufferType::Image(image) => {
+								program_data.device.device.destroy_image_view(
+									image.image_view,
+									None,
+								);
+								program_data.get_allocator().destroy_image(
+									image.image,
+									&image.image_allocation,
+								).unwrap();
+								program_data.device.device.destroy_sampler(
+									image.image_sampler,
+									None,
+								);
+							},
+						}
+					},
 				}
 			}
 		}
@@ -242,20 +278,24 @@ impl BlockState {
 
 		// RECREATE BUFFERS
 		
-		let mut descriptor_data = BlockState::create_buffers(
+		self.recreate_buffers(
 			program_data,
 			cmd_buffer,
 			frame_count,
-			&self.descriptor_description,
-			self.descriptor_data.set_id,
 		);
+		// if !self.descriptor_data.descriptor_sets.is_empty() {
+		// 	program_data.device.device.free_descriptor_sets(
+		// 		program_data.descriptor_pool.descriptor_pool,
+		// 		&self.descriptor_data.descriptor_sets,
+		// 	).unwrap();
+		// 	self.descriptor_data.descriptor_sets.clear();
+		// }
 		let layouts = BlockState::create_writes(
 			program_data,
 			self.layouts.first().unwrap_unchecked(),
 			frame_count,
-			&mut descriptor_data,
+			&mut self.descriptor_data,
 		);
-		self.descriptor_data = descriptor_data;
 		self.layouts = layouts;
 
 		// SUBMIT OTS CMD BUFFER
@@ -314,6 +354,44 @@ impl BlockState {
 		}
 	}}
 
+	fn recreate_buffers(
+		&mut self,
+		program_data: &ProgramData,
+		cmd_buffer: vk::CommandBuffer,
+		frame_count: usize,
+	) { unsafe {
+		for fi in 0..frame_count {
+			self.descriptor_data.frames[fi].descriptor_writes.clear();
+			for (i, description) in self.descriptor_description.dd_types.iter().enumerate() {
+				match description {
+					DDType::Uniform(dd_type) => {
+						let frame = create_uniform_buffer(
+							program_data,
+							dd_type,
+						);
+						self.descriptor_data.frames[fi].descriptors[i] = frame;
+					},
+					DDType::Image(dd_type) => {
+						let frame = create_image_buffer(
+							program_data,
+							&cmd_buffer,
+							dd_type,
+						);
+						self.descriptor_data.frames[fi].descriptors[i] = frame;
+					},
+					DDType::ImageArray(dd_type) => {
+						let frame = create_image_array_buffer(
+							program_data,
+							&cmd_buffer,
+							dd_type,
+						);
+						self.descriptor_data.frames[fi].descriptors[i] = frame;
+					},
+				};
+			}
+		}
+	}}
+
 	fn create_writes(
 		program_data: &ProgramData,
 		descriptor_set_layout: &vk::DescriptorSetLayout,
@@ -352,11 +430,9 @@ impl BlockState {
 							descriptor_data.descriptor_sets[i],
 						)
 					},
-					_ => { unimplemented!(); }
 				};
 				frame.descriptor_writes.push(write);
 			}
-			// println!("{:?}", frame.descriptor_writes[0].);
 			let writes: Vec<vk::WriteDescriptorSet> = frame.descriptor_writes.iter().map(
 				|x| x.write
 			).collect();
