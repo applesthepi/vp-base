@@ -10,6 +10,8 @@ pub use program_data::*;
 mod processing;
 pub use processing::*;
 
+// TODO: OVERHAUL: make full grade engine with vpb being a complete subcomponent replacement and worker.
+
 // TODO: replace all builders with structs
 
 // #[cfg(not(debug_assertions))]
